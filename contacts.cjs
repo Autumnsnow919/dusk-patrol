@@ -1,5 +1,5 @@
 // Continuous collision tests for translated game meshes. All coordinates match the renderer.
-const {buildPlane}=require('./airframes.js');
+const {buildPlane,AirframeJoints}=require('./airframes.js');
 const Lake=require('./lake.js');
 const Flight=require('./flight.js');
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -47,7 +47,7 @@ function tree(tris){
 }
 function model(type){
   if(models.has(type))return models.get(type);
-  const scenery=type==='scenery',data=scenery?Lake.vertices():buildPlane(type).data,scale=scenery?1:1.3,tris=[];
+  const scenery=type==='scenery',shape=scenery?null:buildPlane(type),data=scenery?Lake.vertices():shape.data,scale=scenery?1:1.3,tris=[];
   for(let i=0;i<data.length;i+=30){
     const mat=data[i+9];if([12,13,14].includes(mat))continue;
     const p=[0,10,20].map(off=>[0,1,2].map(j=>data[i+off+j]*scale));
@@ -55,7 +55,7 @@ function model(type){
     if(mat>=6)for(let d=0;d<6;d++)box[d]+=(d%2?1:-1)*6.5;
     tris.push({p,box,mat});
   }
-  const root=tree(tris);models.set(type,root);return root;
+  const root=tree(tris);if(shape){root.pivots=shape.pivots;root.axes=shape.axes;}models.set(type,root);return root;
 }
 function overlaps(a,b){return a[0]<=b[1]&&a[1]>=b[0]&&a[2]<=b[3]&&a[3]>=b[2]&&a[4]<=b[5]&&a[5]>=b[4];}
 function sweepTriangle(h,p,motion,until){
@@ -80,33 +80,40 @@ function sweepTriangle(h,p,motion,until){
 // the rendered nose, fuselage and fin solids in projectile-local space.
 function posed(vertex,mat,b){
   if(mat<6)return vertex;
-  const p=vertex.map(n=>n/1.3),[pitch,yaw,roll]=b.controls,prop=b.type==='sail'||b.type==='rv8a';
+  const p=vertex.map(n=>n/1.3),[pitch,yaw,roll]=b.controls;
   function rotate(i,j,x,y,angle){
     const c=Math.cos(angle),s=Math.sin(angle),a=p[i]-x,h=p[j]-y;
     p[i]=x+a*c-h*s;p[j]=y+a*s+h*c;
   }
-  if(mat===6||mat===8){
-    const hinge=mat===6?(prop?-5.3:-7.4):Flight.fleet[b.type].tip[2]-(prop?1.35:1);
-    rotate(1,2,0,hinge,mat===6?.42*pitch:-.42*roll*Math.sign(p[0])+(Flight.fleet[b.type].elevon?.42*pitch:0));
-  }else if(mat===7){
-    const axis=Math.abs(p[0])>1?Math.sign(p[0])*(1.35+.35*(p[1]-.55)):0;
-    rotate(0,2,axis,prop?-6.25:-7.55,-.48*yaw);
+  if(Object.hasOwn(AirframeJoints.slots,mat)){
+    const side=Math.sign(p[0]),spec=Flight.fleet[b.type];
+    let angle;
+    if(mat===6)angle=.42*pitch;
+    else if(mat===7)angle=-.48*yaw;
+    else if(mat===8)angle=-.42*roll*side+(spec.elevon?.42*pitch:0);
+    else if(mat===15||mat===16)angle=(mat===15?-.58:.92)*b.deploy;
+    else angle=(mat===20?1:-1)*Math.max(-.4*side*yaw,(.53-.33*side*yaw)*b.deploy);
+    const {pivots,axes}=model(b.type),i=3*AirframeJoints.index(mat,p[0]);
+    const ax=axes[i],ay=axes[i+1],az=axes[i+2],x=p[0]-pivots[i],y=p[1]-pivots[i+1],z=p[2]-pivots[i+2];
+    const c=Math.cos(angle),s=Math.sin(angle),h=(ax*x+ay*y+az*z)*(1-c);
+    p[0]=pivots[i]+x*c+(ay*z-az*y)*s+ax*h;
+    p[1]=pivots[i+1]+y*c+(az*x-ax*z)*s+ay*h;
+    p[2]=pivots[i+2]+z*c+(ax*y-ay*x)*s+az*h;
   }else if(mat===9||mat===18){
     const nose=p[2]>1.7,part=nose?'noseGear':p[0]<0?'leftGear':'rightGear';
     if(mat===18){rotate(1,2,nose?-2.15:-2.04,nose?3.25:-1,b.wheelPhase||0);
       if(nose)rotate(0,2,0,3.25,-.48*yaw*b.gear);}
-    const e=b.gear*(b.condition[part]<=12?.2:1),oldY=vertex[1]/1.3;
-    p[1]=-.42+(p[1]+.42)*e;p[2]+=(1-e)*(-.42-oldY)*.8;p[0]*=.32+.68*e;
+    const e=b.gear*(b.condition[part]<=12?.2:1);
+    rotate(1,2,-.18,nose?3.25:-1,(1-e)*1.68);
   }else if(mat===10)rotate(0,1,0,0,b.propPhase||0);
   else if(mat===11){
     rotate(1,2,-.12,-8.4,.50*(b.vector+Math.sign(p[0])*b.vecRoll));
     if(b.vecYaw)rotate(0,2,Math.sign(p[0])*1.32,-8.4,.42*b.vecYaw);
-  }else if(mat===15||mat===16)rotate(1,2,.45,mat===15?-2.8:-3.5,(mat===15?-.58:.92)*b.deploy);
-  else if(mat===17){p[1]+=.48*b.deploy;rotate(0,2,Math.sign(p[0])*3.3,0,b.propPhase||0);}
+  }else if(mat===17)rotate(0,2,Math.sign(p[0])*3.35,4.25,b.propPhase||0);
   else if(mat===19){
     const spec=Flight.fleet[b.type],c=spec.canard;
     rotate(1,2,c.y,c.z,Flight.canardAngle(spec,pitch,roll,b.deploy,Math.sign(p[0])));
-  }else if(mat===20||mat===21)rotate(1,2,.2,-4.8,(mat===20?1:-1)*(.53-.33*Math.sign(p[0])*yaw)*b.deploy);
+  }
   return p.map(n=>n*1.3);
 }
 function contact(shot,type,start,end,basis,body){
@@ -159,4 +166,4 @@ function tracer(shot,from,to){
   }
   return first;
 }
-module.exports={prepare:model,basisOf,unit,plane,scenery,tracer,radius};
+module.exports={prepare:model,posed,basisOf,unit,plane,scenery,tracer,radius};

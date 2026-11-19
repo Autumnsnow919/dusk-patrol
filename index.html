@@ -431,22 +431,26 @@ uniform vec4 uWear,uGearWear;
 uniform float uDeploy;uniform float uElevon;
 uniform vec4 uCanards;
 uniform float uWheel;uniform vec2 uVectorAxes;
-uniform vec2 uShape;    // propeller airframe, outboard wing hinge Z
+uniform vec3 uPivots[14],uJointAxes[14];
+vec3 turn(vec3 v, vec3 axis, float c, float s){
+  return v*c+cross(axis,v)*s+axis*dot(axis,v)*(1.-c);
+}
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,s,-s,c);}
 void main(){
   vec3 p=aPos,n=aNor;float part=aCol.a;
   vCol=aCol.rgb;vMat=part;vLocal=aPos;
   if(part>=6.0){
-    vMat=0.; float prop=uShape.x;
-    if(part==6. || part==8.){
-      float hinge=part==6.?mix(-7.4,-5.3,prop):uShape.y;
-      float angle=part==6.?.42*uControls.x:-.42*uControls.z*sign(p.x)+uElevon*.42*uControls.x;
-      p.yz=rot(angle)*(p.yz-vec2(0.,hinge))+vec2(0.,hinge);n.yz=rot(angle)*n.yz;
-    }else if(part==7.){
-      float hinge=mix(-7.55,-6.25,prop);
-      float axisX=abs(p.x)>1.?sign(p.x)*(1.35+.35*(p.y-.55)):0.;
-      p.xz=rot(-.48*uControls.y)*(p.xz-vec2(axisX,hinge))+vec2(axisX,hinge);
-      n.xz=rot(-.48*uControls.y)*n.xz;
+    vMat=0.;
+    if(part==6. || part==7. || part==8. || part==15. || part==16. || part==20. || part==21.){
+      int slot=part==6.?0:part==7.?1:part==8.?2:part==15.?3:part==16.?4:part==20.?5:6;
+      int idx=slot*2+(p.x<0.?0:1);
+      float angle=part==6.?.42*uControls.x:part==7.?-.48*uControls.y:
+        part==8.?-.42*uControls.z*sign(p.x)+uElevon*.42*uControls.x:
+        part==15.?-.58*uDeploy:part==16.?.92*uDeploy:
+        (part==20.?1.:-1.)*max(-.4*sign(p.x)*uControls.y,(.53-.33*sign(p.x)*uControls.y)*uDeploy);
+      float c=cos(angle),s=sin(angle);
+      p=uPivots[idx]+turn(p-uPivots[idx],uJointAxes[idx],c,s);
+      n=turn(n,uJointAxes[idx],c,s);
     }else if(part==9. || part==18.){
       if(part==18.){
         bool nose=aPos.z>1.7;
@@ -458,9 +462,9 @@ void main(){
         }
       }
       float wheelHealth=aPos.z>1.7?uGearWear.z:(aPos.x<0.?uGearWear.x:uGearWear.y);
-      float h=-.42,extension=uControls.w*(wheelHealth<=.12?.2:1.);
-      p.y=h+(p.y-h)*extension;p.z+=(1.-extension)*(h-aPos.y)*.8;
-      p.x*=.32+.68*extension;
+      float angle=(1.-uControls.w*(wheelHealth<=.12?.2:1.))*1.68;
+      vec2 mount=vec2(-.18,aPos.z>1.7?3.25:-1.);
+      p.yz=rot(angle)*(p.yz-mount)+mount;n.yz=rot(angle)*n.yz;
     }else if(part==10.){
       p.xy=rot(uPower.z)*p.xy;n.xy=rot(uPower.z)*n.xy;
     }else if(part==11. || part==12. || part==13.){
@@ -474,18 +478,12 @@ void main(){
       float swivel=.42*uVectorAxes.x;
       p.xz=rot(swivel)*(p.xz-vec2(sign(p.x)*1.32,-8.4))+vec2(sign(p.x)*1.32,-8.4);
       n.xz=rot(swivel)*n.xz;
-    }else if(part==15. || part==16.){
-      float hinge=part==15.?-2.8:-3.5,angle=(part==15.?-.58:.92)*uDeploy;
-      p.yz=rot(angle)*(p.yz-vec2(.45,hinge))+vec2(.45,hinge);n.yz=rot(angle)*n.yz;
     }else if(part==17.){
-      p.y+=uDeploy*.48;float hub=sign(p.x)*3.3;
-      p.xz=rot(uPower.z)*(p.xz-vec2(hub,0.))+vec2(hub,0.);
+      float hub=sign(p.x)*3.35;
+      p.xz=rot(uPower.z)*(p.xz-vec2(hub,4.25))+vec2(hub,4.25);
     }else if(part==19.){
       float angle=p.x<0.?uCanards.z:uCanards.w;
       p.yz=rot(angle)*(p.yz-uCanards.xy)+uCanards.xy;n.yz=rot(angle)*n.yz;
-    }else if(part==20. || part==21.){
-      float angle=(part==20.?1.:-1.)*(.53-.33*sign(p.x)*uControls.y)*uDeploy;
-      p.yz=rot(angle)*(p.yz-vec2(.2,-4.8))+vec2(.2,-4.8);n.yz=rot(angle)*n.yz;
     }else if(part==14.){
       vMat=5.;p*=uPower.w;
     }
@@ -1139,7 +1137,7 @@ window.Cockpit = Cockpit;
     if(meshes.has(type))return meshes.get(type);
     const shape = buildPlane(type), buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, shape.data, gl.STATIC_DRAW);
-    const mesh={vao:vao(buffer,[3,3,4],10),count:shape.solidEnd};
+    const mesh={vao:vao(buffer,[3,3,4],10),count:shape.solidEnd,pivots:shape.pivots,axes:shape.axes};
     meshes.set(type,mesh);return mesh;
   }
   const lakeBuffer=gl.createBuffer(),lakeData=Lake.vertices();
@@ -1756,7 +1754,7 @@ window.Cockpit = Cockpit;
       const c=condition||healthy;
       gl.uniform4f(pr.u('uWear'),c.fuselage/100,c.leftWing/100,c.rightWing/100,c.tail/100);
       gl.uniform4f(pr.u('uGearWear'),c.leftGear/100,c.rightGear/100,c.noseGear/100,c.engine/100);
-      const prop=type==='sail'||type==='rv8a',spec=Flight.fleet[type];
+      const spec=Flight.fleet[type];
       const burner=type==='needle'||type==='pulse'?rig[6]:0;
       const exhaust=.06+.87*rig[5]**2+burner*.90;
       const mist=Math.max(0,1-Math.abs(mach-1)/.087)*clamp((1700-pos[1])/800,0,1);
@@ -1766,9 +1764,12 @@ window.Cockpit = Cockpit;
       if(spec.canard)gl.uniform4f(pr.u('uCanards'),spec.canard.y,spec.canard.z,
         Flight.canardAngle(spec,rig[0],rig[2],rig[6],-1),Flight.canardAngle(spec,rig[0],rig[2],rig[6],1));
       gl.uniform1f(pr.u('uElevon'),spec.elevon?1:0);gl.uniform1f(pr.u('uDeploy'),rig[6]);gl.uniform1f(pr.u('uWheel'),wheel);
-      gl.uniform2f(pr.u('uShape'),prop?1:0,spec.tip[2]-(prop?1.35:1));
       gl.uniformMatrix4fv(pr.u('uModel'),false,matModel(basis,pos,JS,JS,JS));
       const mesh=meshFor(type);
+      if(pr.jointMesh!==mesh){
+        gl.uniform3fv(pr.u('uPivots[0]'),mesh.pivots);gl.uniform3fv(pr.u('uJointAxes[0]'),mesh.axes);
+        pr.jointMesh=mesh;
+      }
       gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,mesh.count);
     }
     const inside=cam.wCockpit>.72;

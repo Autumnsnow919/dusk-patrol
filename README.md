@@ -16,6 +16,8 @@
 
 ## 机库
 
+[25 架飞机的结构复查](docs/AIRFRAME-REVIEW.md) · [全部机型三视角图板](docs/media/airframe-inspection.webp)
+
 | 星斑 X-3 | 织云 R-5 | 信风 L-4 |
 | :---: | :---: | :---: |
 | ![从右前方看星斑，绿色机翼与双垂尾清晰可见](docs/media/opal.png) | ![从后上方看织云，浅紫色的前后翼在翼尖相接](docs/media/loom.png) | ![从上方看信风，金色长翼横跨机身，机鼻带螺旋桨](docs/media/sail.png) |
