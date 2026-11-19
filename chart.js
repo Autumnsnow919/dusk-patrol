@@ -74,7 +74,7 @@ class OutfitPanel{
     this.summary=element.querySelector('output');this.apply=element.querySelector('.kit-apply');
     this.buttons=Outfit.items.map((item,i)=>{
       const button=document.createElement('button');button.type='button';
-      button.innerHTML='<kbd>'+Outfit.keys[i].slice(5)+'</kbd><span><b>'+item.name+'</b><small>'+item.tip+'</small></span><strong>'+item.cost+' 点</strong>';
+      button.innerHTML='<kbd>'+Outfit.keyLabel(i)+'</kbd><span><b>'+item.name+'</b><small>'+item.tip+'</small></span><strong>'+item.cost+' 点</strong>';
       button.addEventListener('click',()=>this.toggle(i));this.list.append(button);return button;
     });
   }

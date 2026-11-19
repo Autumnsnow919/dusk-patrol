@@ -17,7 +17,7 @@ assert(Lake.touches([530,121,-90]));assert(Lake.touches([255,200,-108]));
 assert(Lake.touches([Lake.gates[2].x+Lake.gates[2].w,Lake.gates[2].y,Lake.gates[2].z]));
 assert.equal(Lake.vertices().length%30,0);
 const arena=new Arena(0),pilot=arena.add('pilot','tern'),peer=arena.add('peer','osprey');
-for(const bad of [0,-1,15,4.5,'5',128,6])assert(!arena.input(pilot,command('gun',{kit:bad})));
+for(const bad of [0,-1,15,4.5,'5',1<<Outfit.items.length,6])assert(!arena.input(pilot,command('gun',{kit:bad})));
 assert.equal(pilot.kit,3);assert.equal(Outfit.cost(5),7);assert.equal(Outfit.cost(10),7);
 assert(arena.input(pilot,command('laser',{kit:5,fire:true,target:peer.id})));assert.equal(pilot.refitAt,5);
 arena.time=1;arena.input(pilot,command('laser',{kit:5}));assert.equal(pilot.refitAt,5);
@@ -40,6 +40,38 @@ arena.input(pilot,command('pulse',{kit:10,fire:true}));
 pilot.body.pos=[0,900,0];peer.body.pos=[0,900,80];arena.tick(Flight.tick);assert.equal(peer.hp,100);
 arena.time=pilot.refitAt+.01;arena.input(pilot,command('pulse',{fire:true}));arena.tick(Flight.tick);assert.equal(peer.hp,77);
 assert.equal(arena.snapshot(pilot,0).self.kit,10);
+// Both new items fit in one seven-point kit. All distances here are game units.
+const echoArc=(1<<7)|(1<<8);
+assert(Outfit.valid(echoArc));assert.equal(Outfit.cost(echoArc),7);
+const party=new Arena(0,'crown');
+const pilots=['sender','selected','near','far'].map(id=>party.add(id,'ember'));
+const [sender,selected,near,far]=pilots;
+for(const [i,x] of [0,100,240,305].entries()){
+  pilots[i].body=Flight.create('ember',[x,1400,0],0);pilots[i].shield=0;
+}
+party.input(sender,command('arc',{kit:echoArc,fire:true,target:selected.id}));
+party.tick(Flight.tick);assert.equal(selected.hp,100);
+party.time=6;
+party.input(sender,command('arc',{fire:true,target:selected.id}));party.tick(Flight.tick);
+assert.deepEqual(pilots.map(p=>p.hp),[100,82,88,100]);
+party.tick(Flight.tick);assert.equal(near.hp,88);
+party.input(sender,command('echo',{fire:true}));party.tick(Flight.tick);
+assert(sender.echo && sender.echoAt>party.time+4);
+const siteOfEcho=sender.echo.pos.slice();
+party.input(sender,command('echo',{fire:false}));
+for(let i=0;i<122;i++){
+  selected.body.pos=siteOfEcho.map((n,k)=>n+(k===0?100:0));
+  near.body.pos=siteOfEcho.map((n,k)=>n+(k===0?240:0));
+  party.tick(Flight.tick);
+}
+assert.equal(selected.hp,54);assert.equal(near.hp,88);assert.equal(sender.hp,100);
+assert.equal(party.events.filter(e=>e.kind==='chime').length,1);
+const pose=require('./peer-pose.js'),fields=require('./airfields.js');
+for(const p of [sender,selected]){
+  const plain=JSON.parse(JSON.stringify(party.snapshot(p,0).self));
+  const wire=JSON.parse(JSON.stringify(party.snapshot(p,0,0,[],true).self));
+  assert.deepEqual(pose.unpackSelf(wire,fields.freshCondition),plain);
+}
 async function network(){
   const server=createServer();
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));

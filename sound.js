@@ -157,7 +157,7 @@ class FlightAudio {
   event(e,id,cam){
     if(!this.audible)return;
     const names={intercept:'burst',hit:'burst',burst:'burst',spark:'hit',missile:'missile',ribbon:'missile',laser:'laser',pulse:'pulse',
-      flare:'flare',prism:'prism',refract:'prism',bloom:'pulse',glyph:'glyph'};
+      echo:'glyph',chime:'pulse',arc:'prism',arcHop:'hit',flare:'flare',prism:'prism',refract:'prism',bloom:'pulse',glyph:'glyph'};
     const cue=names[e.kind];if(!cue)return;
     const impact=['hit','spark','burst','refract','bloom','intercept'].includes(e.kind);
     const local=(impact?e.to:e.from)===id;

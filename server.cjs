@@ -69,7 +69,7 @@ function createServer() {
         const pilot={name,room,type:data.type,id,seen:Date.now(),pose:null,group};
         group.arena?.advance(performance.now()); const fighter=group.arena?.add(id,data.type,name);
         rooms.set(room,group); group.members.add(pilot); sessions.set(token,pilot);
-        return reply(200,{token,id,name,room,mode,rule,type:data.type,protocol:9,slot:fighter?.slot??others.length,lead:others.find(peer=>peer.pose)?.pose,
+        return reply(200,{token,id,name,room,mode,rule,type:data.type,protocol:10,slot:fighter?.slot??others.length,lead:others.find(peer=>peer.pose)?.pose,
           spawn:fighter?.body.pos,heading:fighter?spawnHeading(fighter.slot):undefined});
       }
       const token = req.headers.authorization?.replace(/^Bearer /,''), pilot = sessions.get(token);
@@ -78,7 +78,7 @@ function createServer() {
       if(pilot.group.arena) {
         const arena=pilot.group.arena, player=arena.players.get(pilot.id); arena.advance(performance.now());
         if(!arena.input(player,data)) return reply(400,{});
-        pilot.seen=Date.now(); return reply(200,arena.snapshot(player,Number.isSafeInteger(data.after)?data.after:0,Number.isSafeInteger(data.seenTracer)?data.seenTracer:0,Array.isArray(data.known)&&data.known.length<=8?data.known:null));
+        pilot.seen=Date.now(); return reply(200,arena.snapshot(player,Number.isSafeInteger(data.after)?data.after:0,Number.isSafeInteger(data.seenTracer)?data.seenTracer:0,Array.isArray(data.known)&&data.known.length<=8?data.known:null,data.compactSelf===true));
       }
       const vector = (value,size,limit) => Array.isArray(value) && value.length===size && value.every(num=>Number.isFinite(num)&&Math.abs(num)<=limit);
       if (!vector(data.pos,3,1e7)||!vector(data.quat,4,1.01)||Math.abs(Math.hypot(...data.quat)-1)>.025) return reply(400,{});

@@ -8,12 +8,14 @@ const PeerPose=require('./peer-pose.js');
 const Bolts=require('./bolts.cjs');
 const Contact=require('./contacts.cjs');
 const weapons = {
+  echo:{wait:5,range:155,damage:28},arc:{wait:6,range:440,jump:210,damage:18},
   glyph:{wait:4.2,range:700,damage:30},prism:{wait:6.5},
   pulse: {range:290,wait:3.6,damage:23},
   gun: { range: 620, wait: 1/Sight.gunRate, damage: 2 },
   missile:Sight.profiles.missile,ribbon:Sight.profiles.ribbon,
   laser: { range: 950, wait: 4, damage: 100 }
 };
+function distance2(a,b){return (a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2;}
 const silent = {pitch:0,roll:0,yaw:0,throttle:0};
 const spawnHeading=slot=>slot*Math.PI/4+Math.PI+.30;
 function spawn(slot,type) {
@@ -37,7 +39,7 @@ class Arena {
   }
   reset(player) {
     Object.assign(player,{body:spawn(player.slot,player.type),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:12,flareChargeAt:0,
-      tags:new Map(),acquire:0,lockLife:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
+      tags:new Map(),acquire:0,lockLife:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
   }
   remove(id) {
     this.tracers=this.tracers.filter(t=>t.owner!==id);
@@ -183,6 +185,15 @@ class Arena {
       if(player.hot || this.time-player.lastGun>.28)player.heat=Math.max(0,player.heat-dt*.32);
       if(player.hot && player.heat<=.2)player.hot=false;
       const other=this.players.get(player.target), spec=weapons[player.weapon];
+      if(player.echo && this.time>=player.echo.until){
+        const center=player.echo.pos;
+        this.event('chime',player,player,center,center);
+        for(const peer of this.players.values()){
+          if(peer!==player && peer.hp && distance2(center,peer.body.pos)<=weapons.echo.range**2)
+            hits.push([player,peer,weapons.echo.damage]);
+        }
+        player.echo=null;
+      }
       const mark=player.glyph;
       if(mark && this.time>=mark.until){
         const peer=this.players.get(mark.id);
@@ -215,6 +226,13 @@ class Arena {
       player.tap=false;
       if(player.weapon==='gun')continue;
       if(!available || !player.fire){player.laser=0;continue;}
+      if(player.weapon==='echo'){
+        if(player.echoAt<=this.time){
+          player.echoAt=this.time+spec.wait;player.echo={pos:player.body.pos.slice(),until:this.time+1};
+          this.event('echo',player,player);
+        }
+        continue;
+      }
       if(player.weapon==='prism'){
         if(player.prismAt<=this.time){
           player.prismAt=this.time+spec.wait;player.prismUntil=this.time+1.6;this.event('prism',player,player);
@@ -232,6 +250,19 @@ class Arena {
         continue;
       }
       if(!other?.hp || other===player || other.shield>this.time){player.laser=0;continue;}
+      if(player.weapon==='arc'){
+        if(player.arcAt>this.time || distance2(player.body.pos,other.body.pos)>spec.range**2)continue;
+        player.arcAt=this.time+spec.wait;
+        this.event('arc',player,other);hits.push([player,other,spec.damage]);
+        let nearest=null,best=spec.jump**2;
+        for(const peer of this.players.values()){
+          if(peer===player || peer===other || !peer.hp || peer.shield>this.time)continue;
+          const d=distance2(other.body.pos,peer.body.pos);
+          if(d<=best){nearest=peer;best=d;}
+        }
+        if(nearest){this.event('arcHop',player,nearest,other.body.pos,nearest.body.pos);hits.push([player,nearest,12]);}
+        continue;
+      }
       if(player.weapon==='glyph'){
         if(player.glyphAt<=this.time && Math.hypot(...other.body.pos.map((v,i)=>v-player.body.pos[i]))<=spec.range){
           player.glyphAt=this.time+spec.wait;player.glyph={id:other.id,life:other.life,pos:other.body.pos.slice(),until:this.time+1.2};
@@ -330,7 +361,7 @@ class Arena {
     this.acc+=Math.max(0,Math.min(.25,(now-this.last)/1000));this.last=now;
     while(this.acc+1e-12>=Flight.tick) {this.tick(Flight.tick);this.acc-=Flight.tick;}
   }
-  snapshot(player,after,seenTracer=0,known=null) {
+  snapshot(player,after,seenTracer=0,known=null,compactSelf=false) {
     const summary=pilot=>{
       if(!pilot.lastSummary||pilot.summaryTime!==this.time){
         pilot.summaryTime=this.time;
@@ -362,7 +393,7 @@ class Arena {
       other.poseRow??=PeerPose.pack(peer);
       peers.push(known.includes(peer.id)?other.poseRow:[...other.poseRow,peer.name,peer.type]);
     }
-    return {clock:Math.round(this.time*1000),tracerSeq:this.tracerId,live:this.liveRanges,
+    const result={clock:Math.round(this.time*1000),tracerSeq:this.tracerId,live:this.liveRanges,
       tracers:births,peers,
       self:{...summary(player),vel:rounded(player.body.vel,1000),rates:rounded(player.body.rates,10000),throttle:player.body.throttle,engine:player.body.engine,
         condition:{...player.body.condition},service:player.body.service,damaged:player.body.damaged,pitchTrim:player.body.pitchTrim,grounded:player.body.grounded,gear:player.body.gear,gearDown:player.body.gearDown,touchdowns:player.body.touchdowns,sinkAtTouch:player.body.sinkAtTouch,prism:remain(player.prismUntil),
@@ -376,6 +407,8 @@ class Arena {
         incoming:this.shots.some(shot=>!shot.diverted&&shot.to===player.id&&shot.life===player.life)},
       shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type]),
       events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
+    if(compactSelf)result.self=PeerPose.packSelf(result.self);
+    return result;
   }
 }
 module.exports={Arena,spawnHeading};

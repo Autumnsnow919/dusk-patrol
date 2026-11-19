@@ -17,7 +17,7 @@ class FlightRoom {
     this.leave();
     const version=this.generation;
     const reply=await this.request('join',{room,type,mode,name,rule});
-    if(reply.mode!==mode||reply.protocol!==9||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw new Error('旧版房主');}
+    if(reply.mode!==mode||reply.protocol!==10||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw new Error('旧版房主');}
     if(version!==this.generation) { this.request('leave',{},reply.token).catch(()=>{}); return null; }
     this.token=reply.token; this.id=reply.id;this.name=reply.name;this.mode=mode;this.rule=rule;this.code=reply.room??room; this.status=this.code+' · 1/8'; this.nextSync=0; return reply;
   }
@@ -27,10 +27,10 @@ class FlightRoom {
     const duel=this.mode==='pvp';
     this.busy=true; this.nextSync=now+(duel?65:90);
     try {
-      const command=duel?{controls,weapon:this.weapon,target:this.target,fire,tap:this.triggerTap,dodge:this.dodge,after:this.after,seenTracer:this.seenTracer,known:[...this.peers.keys()]}:{pos:body.pos,quat:body.quat,vel:body.vel,condition:body.damaged?body.condition:undefined,rig:Flight.rig(body).map(v=>Math.round(v*100)/100)};
+      const command=duel?{controls,compactSelf:true,weapon:this.weapon,target:this.target,fire:fire||this.triggerTap,tap:this.triggerTap,dodge:this.dodge,after:this.after,seenTracer:this.seenTracer,known:[...this.peers.keys()]}:{pos:body.pos,quat:body.quat,vel:body.vel,condition:body.damaged?body.condition:undefined,rig:Flight.rig(body).map(v=>Math.round(v*100)/100)};
       if(duel && this.pendingKit!==null)command.kit=this.pendingKit;
       this.triggerTap=false;this.dodge=false;
-      const {peers,self,events,serial,harbor,shots,tracers,clock,tracerSeq,live}=await this.request('sync',command,this.token);
+      const {peers,self:wireSelf,events,serial,harbor,shots,tracers,clock,tracerSeq,live}=await this.request('sync',command,this.token);
       if(version!==this.generation) return;
       const keep=new Set();
       for(let i=0;i<peers.length;i++){
@@ -45,6 +45,7 @@ class FlightRoom {
       for(const id of this.peers.keys()) if(!keep.has(id)) this.peers.delete(id);
       this.harbor=harbor;
       if(duel) {
+        const self=Array.isArray(wireSelf)?PeerPose.unpackSelf(wireSelf,Airfields.freshCondition):wireSelf;
         for(const shot of tracers)this.tracers.set(shot[0],shot);
         let range=0;
         for(const id of this.tracers.keys()){

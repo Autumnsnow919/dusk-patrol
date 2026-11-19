@@ -16,7 +16,9 @@ const Lake = (() => {
     {id:'viaduct',name:'琥珀高架廊',pos:[23600,320,4100],note:'沿高架桥下方穿过连续门跨',color:'#ffb782'},
     {id:'shell',name:'月壳海湾',pos:[-22400,490,7000],note:'沿白色壳肋的中轴穿过海湾',color:'#cce6da'},
     {id:'needles',name:'蓝针石林',pos:[3200,520,-25600],note:'在交错岩柱之间沿山谷蛇行',color:'#abc8fb'},
-    {id:'lanterns',name:'浮灯天阶',pos:[-7000,710,25900],note:'逐级抬高航线，穿过三座悬空灯门',color:'#ffe08a'}
+    {id:'lanterns',name:'浮灯天阶',pos:[-7000,710,25900],note:'逐级抬高航线，穿过三座悬空灯门',color:'#ffe08a'},
+    {id:'dock',name:'折光船坞',pos:[3520,510,2200],note:'向南穿琥珀起点，绕开船坞吊臂，经过青门和紫门计时',color:'#ffba98'},
+    {id:'aqueduct',name:'苍穹渡槽',pos:[17800,530,-16400],note:'沿南北向高槽下层通场，侧窗之间可以横向穿出',color:'#9be4dc'}
   ];
   const frontier=sites.slice(12);
   const gates = [
@@ -175,6 +177,31 @@ const Lake = (() => {
     hoop({x,y,z,w:106,h:90},k?'gold':'violet');
     for(const side of [-1,1])mast(x+side*106,z,200,y-10,5,'slate');
   }
+  group=groups[16];
+  const dockGates=[
+    {x:3520,y:510,z:2200,w:96,h:80},{x:3350,y:560,z:2740,w:86,h:74},{x:3560,y:495,z:3360,w:92,h:78}
+  ];
+  for(const [i,g] of dockGates.entries()){
+    hoop(g,['gold','teal','violet'][i]);
+    const side=i===1?-1:1,x=g.x+side*168;
+    mast(x,g.z,-80,g.y+140,32,'wine');
+    beam([x,g.y+140,g.z],[g.x-side*90,g.y+108,g.z],18,14,'cream');
+    beam([x,g.y+60,g.z],[g.x+side*65,g.y+125,g.z],11,11,'red');
+    mast(g.x-side*72,g.z,g.y+91,g.y+112,5,'gold');
+  }
+  group=groups[17];
+  for(let i=-2;i<=2;i++){
+    const z=-16400+340*i;
+    for(const side of [-1,1]){
+      const x=17800+side*174;
+      mast(x,z,-85,583,32,'slate');
+      beam([x,582,z],[17800+side*75,675,z],25,24,'teal');
+      if(i<2)beam([x,693,z],[x,693,z+340],16,54,'cream');
+    }
+    beam([17605,673,z],[17995,673,z],42,19,'teal');
+    if(i<2)beam([17800,654,z],[17800,654,z+340],345,16,'slate');
+  }
+  const courses=[{site:1,name:'云梯',gates},{site:16,name:'折光船坞',gates:dockGates}];
   const arenaRadius=32000,arenaCeiling=7200;
   const buckets=new Map(),empty=[];
   const bucketKey=(x,z)=>x+z*65536;
@@ -211,6 +238,7 @@ const Lake = (() => {
   }
   function collide(b){
     const [x,y,z]=b.pos,radius=Math.max(16,b.span+1);
+    if(y>sceneryTop+radius)return false;
     if(!candidates(x,z,radius).some(g=>x>=g.min[0]-radius&&x<=g.max[0]+radius&&y>=g.min[1]-radius&&y<=g.max[1]+radius&&z>=g.min[2]-radius&&z<=g.max[2]+radius))return false;
     const {r,f}=b.basis;
     for(const [part,side,long] of [['fuselage',0,0],['leftWing',-b.span,0],['rightWing',b.span,0],['tail',0,-9]]){
@@ -228,18 +256,20 @@ const Lake = (() => {
     const center=g.min.map((v,i)=>(v+g.max[i])*.5);
     return {center,roof:g.max[1],min:g.min,max:g.max,radius:Math.hypot(...center.map((v,i)=>v-g.min[i])),count:g.parts.length*36};
   });
+  const faceCorners=[[-1,-1],[1,-1],[1,1],[-1,-1],[1,1],[-1,1]];
   function vertices(){
-    const out=[];
+    const out=new Float32Array(batches.reduce((sum,b)=>sum+b.count,0)*10);
+    let offset=0;
     for(const g of groups)for(const {mid,axes,half,tint} of g.parts){
       for(let axis=0;axis<3;axis++)for(const sign of [-1,1]){
         const u=(axis+1)%3,v=(axis+2)%3,normal=axes[axis].map(value=>value*sign);
-        for(const [a,b] of [[-1,-1],[1,-1],[1,1],[-1,-1],[1,1],[-1,1]]){
-          for(let d=0;d<3;d++)out.push(mid[d]+normal[d]*half[axis]+a*axes[u][d]*half[u]+b*axes[v][d]*half[v]);
-          out.push(...normal,...tint,-1);
+        for(const [a,b] of faceCorners){
+          for(let d=0;d<3;d++)out[offset++]=mid[d]+normal[d]*half[axis]+a*axes[u][d]*half[u]+b*axes[v][d]*half[v];
+          out.set(normal,offset);out.set(tint,offset+3);out[offset+6]=-1;offset+=7;
         }
       }
     }
-    return new Float32Array(out);
+    return out;
   }
   function crosses(g,a,b){
     if(a[2]>=g.z||b[2]<g.z)return false;
@@ -250,6 +280,6 @@ const Lake = (() => {
     return Math.abs(pos[1]-site.pos[1])<=175 && (pos[0]-site.pos[0])**2+(pos[2]-site.pos[2])**2<=320**2;
   }
   const sceneryTop=Math.max(...groups.map(g=>g.max[1]));
-  return {sites,frontier,gates,batches,sceneryTop,arenaRadius,arenaCeiling,collide,touches,vertices,crosses,inZone,relayOrder:[2,4,1],relayDuration:45};
+  return {sites,frontier,gates,courses,batches,sceneryTop,arenaRadius,arenaCeiling,collide,touches,vertices,crosses,inZone,relayOrder:[2,4,1,16],relayDuration:45};
 })();
 if(typeof module!=='undefined')module.exports=Lake;

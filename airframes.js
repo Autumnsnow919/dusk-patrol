@@ -106,12 +106,21 @@ function buildPlane(type = 'comet', cells = null) {
     const [span,rise,sweep]=fleet[type].tip;
     loft([foil(sgn*1.7, type==='delta'?15:type==='manta'?12:7.6,-1.3,.26,.05), foil(sgn*4.2,4.4,sweep*.65,.16,rise*.4),foil(sgn*span,2,sweep,.09,rise)], [camo,camo]);
     loft([foil(sgn*(span-.38),.76,sweep+.12,.14,rise+.08),foil(sgn*(span+.10),.52,sweep+.08,.09,rise+.09)],[sgn===1?[.56,.92,.70]:[1,.43,.30]],4);
+    if(type==='nocturne'){
+      loft([foil(sgn*.72,13.8,1.1,.34,.24),foil(sgn*4.4,7.9,-.65,.22,.32),foil(sgn*7.8,2.6,-4.4,.11,.18)],[GREY,SLATE]);
+      for(const skin of [-1,1])loft([foil(sgn*6.7,1.35,-5.4,.06,.2+.07*skin),foil(sgn*8.9,1.0,-5.6,.04,.2+.07*skin)],[skin>0?PALE:SLATE],skin>0?20:21);
+    }
+    if(type==='ember'){
+      loft([foil(sgn*.85,3.3,4.7,.18,.42),foil(sgn*4.35,1.0,3.7,.08,.62)],[PALE],19);
+      loft([foil(sgn*.85,9.3,-1.1,.24,.25),foil(sgn*4.8,3.9,-2.9,.11,.20)],[SLATE]);
+    }
+    if(type==='tandem')loft([foil(sgn*.7,3.5,3.6,.18,.85),foil(sgn*5.9,2.1,3.65,.12,1.05),foil(sgn*7.5,1.2,3.32,.08,1.3)],[GREY,PALE],19);
     if(type==='opal'){
       loft([foil(sgn*.8,7,1.7,.28,.30),foil(sgn*4.6,4.2,-.3,.18,.48),foil(sgn*7.1,1.3,-2.4,.08,.92)],[GREY,SLATE]);
       loft([finS(.4,sgn*3.2,4.1,-4.1,.16),finS(2.35,sgn*5.2,1.2,-5.9,.05)],[PALE]);
     }
     if(type==='lance'){
-      loft([foil(sgn*.85,3.1,5.5,.16,.38),foil(sgn*2.75,1.2,4.9,.08,.48)],[PALE]);
+      loft([foil(sgn*.85,3.1,5.5,.16,.38),foil(sgn*2.75,1.2,4.9,.08,.48)],[PALE],19);
       loft([finS(-.45,sgn*1.8,3.2,-6.3,.14),finS(-1.6,sgn*2.6,1.3,-7.2,.08)],[SLATE]);
     }
     if(type==='loom'){
@@ -137,13 +146,13 @@ function buildPlane(type = 'comet', cells = null) {
     }
     if(type==='manta')loft([ell(1.8,.86,.42,.12,12,sgn*3.3),ell(-1.5,1.05,.52,.13,12,sgn*3.3)],[SLATE]);
     if(type==='osprey')loft([finS(rise,sgn*span,1.9,sweep,.10),finS(2.7,sgn*(span+.45),1,sweep-.4,.08)],[GREY]);
-    if(type==='kite'||type==='pulse'||type==='petrel'||type==='aurora')loft([foil(sgn*.9,2.4,4.7,.13,.22),foil(sgn*(type==='kite'?3.8:2.9),.75,3.9,.06,.35)],[GREY]);
-    if(type!=='delta')loft([foil(sgn * 1.9, 3.0, -7.4, 0.14, 0.0), foil(sgn * 4.3, 1.2, -8.5, 0.07, -0.02)], [camo],6);
+    if(type==='kite'||type==='pulse'||type==='petrel'||type==='aurora')loft([foil(sgn*.9,2.4,4.7,.13,.22),foil(sgn*(type==='kite'?3.8:2.9),.75,3.9,.06,.35)],[GREY],19);
+    if(!fleet[type].elevon && type!=='tandem')loft([foil(sgn * 1.9, 3.0, -7.4, 0.14, 0.0), foil(sgn * 4.3, 1.2, -8.5, 0.07, -0.02)], [camo],6);
     const twin=type==='comet'||type==='pulse'||type==='aurora'||type==='skate';
-    if(twin||sgn===1)loft([finS(.7,twin?sgn*1.4:0,1.2,-7.95,.1),finS(twin?3.3:3.9,twin?sgn*2.3:0,.7,-8.45,.06)],[SLATE],7);
+    if(type!=='nocturne' && (twin||sgn===1))loft([finS(.7,twin?sgn*1.4:0,1.2,-7.95,.1),finS(twin?3.3:3.9,twin?sgn*2.3:0,.7,-8.45,.06)],[SLATE],7);
     // canted fin with a red cap
     if (twin) loft([finS(.55,sgn*1.35,3.6,-6.3,.14),finS(2.8,sgn*2.12,2,-7.37,.09),finS(3.5,sgn*2.35,1.5,-7.7,.07)],[camo,RED]);
-    else if (sgn === 1) loft([finS(.55,0,4,-6.2,.18),finS(3.3,0,2.2,-7.2,.12),finS(4.1,0,1.5,-7.7,.07)],[camo,RED]);
+    else if (sgn === 1 && type!=='nocturne') loft([finS(.55,0,4,-6.2,.18),finS(3.3,0,2.2,-7.2,.12),finS(4.1,0,1.5,-7.7,.07)],[camo,RED]);
   }
   // gold-tinted bubble canopy
   const can = (z, w, h, yb) => [[-w, yb - 0.1, z], [-w * 0.86, yb + 0.72 * h, z], [-w * 0.36, yb + h, z], [w * 0.36, yb + h, z], [w * 0.86, yb + 0.72 * h, z], [w, yb - 0.1, z]];

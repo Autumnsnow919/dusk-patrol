@@ -129,7 +129,7 @@ body.touch .hints.at-bottom { bottom: auto; top: 56px; }
   <section id="outfit" class="flight-panel corner" hidden aria-label="战局配装">
     <header><h3>战局配装</h3><output aria-live="polite"></output></header>
     <div class="kit-list"></div>
-    <p>1–6、8 选择或卸下。战斗中换装需要 5 秒，期间可照常飞行。</p>
+    <p>1–6、8、9、− 选择或卸下。战斗中换装需要 5 秒，期间可照常飞行。</p>
     <button class="kit-apply" type="button">Enter　应用配装</button><button class="kit-close" type="button">Esc　取消</button>
   </section>
   <aside id="damage-panel" hidden aria-label="机体损伤图"><strong>机体状态</strong><canvas id="damage-plan" width="80" height="74"></canvas><div id="part-values"></div><small id="service-note"></small></aside>
@@ -145,6 +145,7 @@ void main(){ vUV = aP*0.5+0.5; gl_Position = vec4(aP,0.0,1.0); }`;
 
 // The whole landscape is ray-marched per low-res pixel: land, water, clouds, sky.
 // Per-aircraft light-space tiles keep the silhouette stable as the camera moves.
+const districtRows=Math.ceil(Lake.batches.length/4);
 const AIR_SHADOW = `
 uniform sampler2D uAircraftAtlas;
 uniform vec3 uCasters[8],uLightRight,uLightUp,uCastLight;
@@ -156,7 +157,7 @@ float landmarkShadow(vec3 p){
     vec3 rel=p-uDistricts[i].xyz;float size=uDistricts[i].w;
     vec2 q=.5+vec2(dot(rel,uLightRight),dot(rel,uLightUp))/(2.*size);
     if(any(lessThan(q,vec2(.002)))||any(greaterThan(q,vec2(.998))))continue;
-    vec2 m=texture(uDistrictAtlas,(uDistrictTiles[i]+q)*.25).rg;
+    vec2 m=texture(uDistrictAtlas,(uDistrictTiles[i]+q)/vec2(4.,${districtRows.toFixed(1)})).rg;
     float z=.5+dot(rel,uCastLight)/(2.*size);
     light=min(light,1.-m.r*smoothstep(.006,.012,m.g/max(.001,m.r)-z));
   }
@@ -428,6 +429,7 @@ uniform vec4 uControls; // elevator, rudder, ailerons, wheel extension
 uniform vec4 uPower;    // nozzle tilt, exhaust strength, propeller phase, condensation
 uniform vec4 uWear,uGearWear;
 uniform float uDeploy;uniform float uElevon;
+uniform vec4 uCanards;
 uniform float uWheel;uniform vec2 uVectorAxes;
 uniform vec2 uShape;    // propeller airframe, outboard wing hinge Z
 mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,s,-s,c);}
@@ -479,8 +481,11 @@ void main(){
       p.y+=uDeploy*.48;float hub=sign(p.x)*3.3;
       p.xz=rot(uPower.z)*(p.xz-vec2(hub,0.))+vec2(hub,0.);
     }else if(part==19.){
-      float angle=-.36*uDeploy+.22*uControls.x;
-      p.yz=rot(angle)*(p.yz-vec2(.5,4.2))+vec2(.5,4.2);n.yz=rot(angle)*n.yz;
+      float angle=p.x<0.?uCanards.z:uCanards.w;
+      p.yz=rot(angle)*(p.yz-uCanards.xy)+uCanards.xy;n.yz=rot(angle)*n.yz;
+    }else if(part==20. || part==21.){
+      float angle=(part==20.?1.:-1.)*(.53-.33*sign(p.x)*uControls.y)*uDeploy;
+      p.yz=rot(angle)*(p.yz-vec2(.2,-4.8))+vec2(.2,-4.8);n.yz=rot(angle)*n.yz;
     }else if(part==14.){
       vMat=5.;p*=uPower.w;
     }
@@ -1276,7 +1281,7 @@ window.Cockpit = Cockpit;
   let body = Flight.create('tern'), chaseQuat = body.quat.slice(), accumulator = 0, flying = false, notice = '', noticeUntil = 0;
   const room = new FlightRoom(), keys = new Set(), scope=new DuelScope($('scope'));
   const chart=new LakeChart($('map-paper')),outfit=new OutfitPanel($('outfit'));
-  const trial={next:0,time:0,best:0,last:0}, prior=[0,0,0];
+  const trial={next:0,time:0,best:new Map(),course:Lake.courses[0]}, prior=[0,0,0];
   let navUntil=0,followBeacon=false,watchId=null,onlineSortie=false,soloName='飞行员';
   try{$('pilot-name').value=localStorage.getItem('dusk-pilot')||'';}catch{}
   function selectNextSite(){navUntil=performance.now()+6000;followBeacon=false;chart.cycle();nextReadout=0;}
@@ -1337,7 +1342,7 @@ window.Cockpit = Cockpit;
   const axisKey = (plus,minus) => Number(keys.has(plus))-Number(keys.has(minus));
   const tipFor = () => Flight.fleet[body.type].tip;
   function resetFlight(type, pos, yaw) {
-    lastCondition='';damageUntil=0;body = Flight.create(type,pos,yaw); S.pos=body.pos;gearRequest=body.gearDown;waveHistory.clear();
+    trial.next=0;trial.time=0;lastCondition='';damageUntil=0;body = Flight.create(type,pos,yaw); S.pos=body.pos;gearRequest=body.gearDown;waveHistory.clear();
     accumulator=0; chaseQuat=body.quat.slice();
     for(const trail of trails) {trail.n=0;trail.head=0;trail.acc=0;}
     parts.n=0;parts.acc=0;orbit.anchor=null;
@@ -1413,12 +1418,14 @@ window.Cockpit = Cockpit;
           noticeUntil=performance.now()+7000;
         }
         if(trial.next)trial.time+=Flight.tick;
-        if(Lake.crosses(Lake.gates[0],prior,body.pos)){trial.time=0;trial.next=1;chart.selected=1;}
-        else if(trial.next && Lake.crosses(Lake.gates[trial.next],prior,body.pos)){
-          if(++trial.next===Lake.gates.length){
-            trial.last=trial.time;trial.best=trial.best?Math.min(trial.best,trial.time):trial.time;trial.next=0;
-            notice='云梯完赛 · '+trial.last.toFixed(2)+' 秒';noticeUntil=performance.now()+7000;
+        if(trial.next && Lake.crosses(trial.course.gates[trial.next],prior,body.pos)){
+          if(++trial.next===trial.course.gates.length){
+            trial.best.set(trial.course.site,Math.min(trial.best.get(trial.course.site)??Infinity,trial.time));
+            trial.next=0;notice=trial.course.name+'完赛 · '+trial.time.toFixed(2)+' 秒';noticeUntil=performance.now()+7000;
           }
+        }else for(const course of Lake.courses){
+          if(!Lake.crosses(course.gates[0],prior,body.pos))continue;
+          trial.course=course;trial.time=0;trial.next=1;chart.selected=course.site;break;
         }
       }
     }
@@ -1614,7 +1621,7 @@ window.Cockpit = Cockpit;
     for(let k=0;k<3;k++){m[k*4]=lightRight[k]/size;m[k*4+1]=lightUp[k]/size;m[k*4+2]=-sunL[k]/size;}
     m[12]=-dot(lightRight,p)/size;m[13]=-dot(lightUp,p)/size;m[14]=dot(sunL,p)/size;m[15]=1;return m;
   }
-  const districtAtlas=target(1024,1024),districts=new Float32Array(16),districtTiles=new Float32Array(8);
+  const districtAtlas=target(1024,256*districtRows),districts=new Float32Array(16),districtTiles=new Float32Array(8);
   gl.bindTexture(gl.TEXTURE_2D,districtAtlas.color);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
@@ -1645,17 +1652,25 @@ window.Cockpit = Cockpit;
   function render() {
     const aspect = IW / IH;
     const B = Flight.axes(body.quat);
+    const tanY=Math.tan(cam.fov/2),tanX=tanY*aspect,sideX=Math.hypot(1,tanX),sideY=Math.hypot(1,tanY);
+    function inView(p,r,far=FARZ){
+      const x=p[0]-cam.pos[0],y=p[1]-cam.pos[1],z=p[2]-cam.pos[2];
+      const f=cam.B.f,right=cam.B.r,up=cam.B.u,depth=x*f[0]+y*f[1]+z*f[2];
+      return depth+r>=0 && depth-r<=far &&
+        Math.abs(x*right[0]+y*right[1]+z*right[2])<=depth*tanX+r*sideX &&
+        Math.abs(x*up[0]+y*up[1]+z*up[2])<=depth*tanY+r*sideY;
+    }
     let pr=P.cast;castCount=0;districtCount=0;
     if(flying){
       const nearby=[];
-      for(const [i,b] of Lake.batches.entries()){
-        const d=Math.hypot(b.center[0]-cam.pos[0],b.center[2]-cam.pos[2])-b.radius;
+      for(let i=0;i<Lake.batches.length;i++){
+        const b=Lake.batches[i],dx=b.center[0]-cam.pos[0],dz=b.center[2]-cam.pos[2];
+        const dist2=dx*dx+dz*dz;
+        if(dist2>=(2000+b.radius)**2)continue;
+        const d=Math.sqrt(dist2)-b.radius;
         const height=b.roof+96,reach=height/Math.max(.1,sunL[1]);
         const middle=b.center.map((v,k)=>v-sunL[k]*reach*.4);
-        const delta=sub(middle,cam.pos),z=dot(delta,cam.B.f),radius=b.radius+reach*.45;
-        const tanY=Math.tan(cam.fov/2),tanX=tanY*aspect;
-        if(d<2000 && z+radius>0 && Math.abs(dot(delta,cam.B.r))<z*tanX+radius*Math.hypot(1,tanX)
-             && Math.abs(dot(delta,cam.B.u))<z*tanY+radius*Math.hypot(1,tanY))nearby.push({i,b,d});
+        if(inView(middle,b.radius+reach*.45))nearby.push({i,b,d});
       }
       nearby.sort((a,b)=>a.d-b.d);
       for(const {i,b} of nearby.slice(0,4)){
@@ -1730,13 +1745,9 @@ window.Cockpit = Cockpit;
     gl.uniformMatrix4fv(pr.u('uModel'),false,identity);
     if(flying){
       gl.bindVertexArray(lakeMesh);
-      const tanY=Math.tan(cam.fov/2),tanX=tanY*aspect,sideX=Math.hypot(1,tanX),sideY=Math.hypot(1,tanY);
       let start=0,count=0;
       for(const batch of Lake.batches){
-        const dx=batch.center[0]-cam.pos[0],dy=batch.center[1]-cam.pos[1],dz=batch.center[2]-cam.pos[2];
-        const project=a=>a[0]*dx+a[1]*dy+a[2]*dz;
-        const z=project(cam.B.f),r=batch.radius;
-        if(z+r>0 && z-r<14000 && Math.abs(project(cam.B.r))<=z*tanX+r*sideX && Math.abs(project(cam.B.u))<=z*tanY+r*sideY)count+=batch.count;
+        if(inView(batch.center,batch.radius,14000))count+=batch.count;
         else {if(count)gl.drawArrays(gl.TRIANGLES,start,count);start+=count+batch.count;count=0;}
       }
       if(count)gl.drawArrays(gl.TRIANGLES,start,count);
@@ -1752,15 +1763,18 @@ window.Cockpit = Cockpit;
       gl.uniform4f(pr.u('uControls'),rig[0],rig[1],rig[2],rig[3]);
       gl.uniform4f(pr.u('uPower'),rig[4],exhaust*(1+.055*Math.sin(S.time*53)),phase,mist);
       gl.uniform2f(pr.u('uVectorAxes'),rig[7]||0,rig[8]||0);
-      gl.uniform1f(pr.u('uElevon'),type==='delta'?1:0);gl.uniform1f(pr.u('uDeploy'),rig[6]);gl.uniform1f(pr.u('uWheel'),wheel);
+      if(spec.canard)gl.uniform4f(pr.u('uCanards'),spec.canard.y,spec.canard.z,
+        Flight.canardAngle(spec,rig[0],rig[2],rig[6],-1),Flight.canardAngle(spec,rig[0],rig[2],rig[6],1));
+      gl.uniform1f(pr.u('uElevon'),spec.elevon?1:0);gl.uniform1f(pr.u('uDeploy'),rig[6]);gl.uniform1f(pr.u('uWheel'),wheel);
       gl.uniform2f(pr.u('uShape'),prop?1:0,spec.tip[2]-(prop?1.35:1));
       gl.uniformMatrix4fv(pr.u('uModel'),false,matModel(basis,pos,JS,JS,JS));
       const mesh=meshFor(type);
       gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,mesh.count);
     }
     const inside=cam.wCockpit>.72;
-    for(const c of craft)if(!inside||c[1]!==S.pos)drawAircraft(...c);
+    for(const c of craft)if((!inside||c[1]!==S.pos)&&inView(c[1],48))drawAircraft(...c);
     for(const shot of room.shots.values()){
+      if(!inView(shot.shown,12))continue;
       const front=norm(shot.front);
       if(Math.hypot(...front)<.1)continue;
       const right=norm(cross(front,Math.abs(front[1])>.99?[1,0,0]:[0,1,0]));
@@ -1867,7 +1881,7 @@ window.Cockpit = Cockpit;
   function updateHints() {
     if(S.view===3){
       $('hints').textContent=(orbit.anchor?'定点观测 · G 恢复环绕':'自由环绕 · 方向键转镜头　G 定点观测')+'　I 前方通场机位　[ / ] 缩放　0 侧视复位　C 返回';
-    }else $('hints').textContent=(room.mode==='pvp'?'1–6、8 武器　J 开火　T 目标　X 热诱弹　L 配装　B 导航':'W/S 俯仰　 A/D 滚转　 Q/E 偏航　 R/F 油门')+'　U 起落架　Z 轮刹　7 机体　N 航图　K 航点　C 镜头　H 机库';
+    }else $('hints').textContent=(room.mode==='pvp'?'1–6、8、9、− 武器　J 开火　T 目标　X 热诱弹　L 配装　B 导航':'W/S 俯仰　 A/D 滚转　 Q/E 偏航　 R/F 油门')+'　U 起落架　Z 轮刹　7 机体　N 航图　K 航点　C 镜头　H 机库';
   }
   function park() {
     inspectParts=false;damageUntil=0;$('damage-panel').hidden=true;
@@ -1946,14 +1960,14 @@ window.Cockpit = Cockpit;
       }
       S.view=S.prev=1; S.viewT=1; notice=''; keys.clear(); flying=true;audio.setActive(!document.hidden);
       $('hangar').hidden=true; $('strip').hidden=false; $('title').classList.add('gone'); document.activeElement?.blur();
-      Object.assign(trial,{next:0,time:0,best:0,last:0});followBeacon=room.mode==='pvp';chart.selected=followBeacon?2:Number($('depart').value);
+      Object.assign(trial,{next:0,time:0,best:new Map(),course:Lake.courses[0]});followBeacon=room.mode==='pvp';chart.selected=followBeacon?2:Number($('depart').value);
       duelLife=0; onlineSortie=online;$('scope').hidden=!onlineSortie;updateHints();last=performance.now();
     } catch(error) {
       audio.setActive(false);
       $('launch-note').textContent=error.reason==='mode'?'该房间已使用另一种玩法，请换房间码。':error.status===409?'房间已满，请更换房间码。':location.protocol==='file:'?error.message:'未能连接房间。请确认房主已启动新版服务。';
     } finally { $('mode').disabled=$('airframe').disabled=$('launch').disabled=false; }
   });
-  const flightKeys=new Set(['KeyW','KeyS','KeyA','KeyD','KeyQ','KeyE','KeyR','KeyF','KeyH','KeyM','KeyU','KeyZ','KeyI','Comma','Period','KeyP','KeyV','KeyJ','KeyT','KeyX','KeyC','KeyG','Digit0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','BracketLeft','BracketRight','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','KeyL','KeyK','KeyY','KeyN','KeyO','KeyB','Escape','Enter','Space']);
+  const flightKeys=new Set(['KeyW','KeyS','KeyA','KeyD','KeyQ','KeyE','KeyR','KeyF','KeyH','KeyM','KeyU','KeyZ','KeyI','Comma','Period','KeyP','KeyV','KeyJ','KeyT','KeyX','KeyC','KeyG','Digit0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','BracketLeft','BracketRight','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Minus','KeyL','KeyK','KeyY','KeyN','KeyO','KeyB','Escape','Enter','Space']);
   addEventListener('keydown',event=>{
     if(!flying || !flightKeys.has(event.code)) return;
     // Enter and Space retain normal activation for a focused panel button.
@@ -2002,7 +2016,7 @@ window.Cockpit = Cockpit;
     if(room.mode==='pvp'){
       if(slot>=0 && Outfit.has(room.kit,Outfit.items[slot].id))room.weapon=Outfit.items[slot].id;
       if(event.code==='KeyX')room.dodge=true;
-      if(event.code==='KeyJ' && room.weapon==='gun')room.triggerTap=true;
+      if(event.code==='KeyJ')room.triggerTap=true;
       if(event.code==='KeyT'){const live=[...room.peers.values()].filter(peer=>peer.hp);room.target=live[(live.findIndex(peer=>peer.id===room.target)+1)%live.length]?.id??null;}
     }
     if(event.code==='KeyH') park();
@@ -2049,7 +2063,7 @@ window.Cockpit = Cockpit;
     const self=room.self;
     if(self&&followBeacon&&!self.star)chart.selected=self.beacon.site;
     const site=Lake.sites[chart.selected];
-    const target=room.mode!=='pvp'&&trial.next&&chart.selected===1?Lake.gates[trial.next]:null;
+    const target=room.mode!=='pvp'&&trial.next&&chart.selected===trial.course.site?trial.course.gates[trial.next]:null;
     const star=self?.star,carrier=star?.id===room.id?body:room.peers.get(star?.id);
     const followingStar=followBeacon&&carrier;
     const targetPos=followingStar?carrier.pos:target?[target.x,target.y,target.z]:site.pos;
@@ -2057,7 +2071,7 @@ window.Cockpit = Cockpit;
     const bearing=(Math.atan2(dx,-dz)*180/Math.PI+360)%360;
     $('waypoint').hidden=room.mode==='pvp' && $('lake-chart').hidden && now>=navUntil;
     $('trait-state').hidden=!watchId && S.view!==3 && body.deploy<.05 && $('lake-chart').hidden && !displayPerf;
-    $('waypoint').textContent=(followingStar?'持星 · '+(carrier.name||room.name):target?'云梯 · 第 '+trial.next+' 环':site.name)+'　'+Math.round(Math.hypot(dx,dz))+' m　方位 '+Math.round(bearing)+'°（航向 '+Math.round((S.yaw*180/Math.PI+360)%360)+'°）　航点高度 '+Math.round(targetPos[1])+' m';
+    $('waypoint').textContent=(followingStar?'持星 · '+(carrier.name||room.name):target?trial.course.name+' · 第 '+trial.next+' 环':site.name)+'　'+Math.round(Math.hypot(dx,dz))+' m　方位 '+Math.round(bearing)+'°（航向 '+Math.round((S.yaw*180/Math.PI+360)%360)+'°）　航点高度 '+Math.round(targetPos[1])+' m';
     if(!$('lake-chart').hidden){chart.draw(body,room);$('map-note').textContent=site.name+'　'+site.note+(Lake.frontier.includes(site)?'　外环通场 '+chart.survey.size+'/'+Lake.frontier.length:'');
       $('map-score').textContent=self?[{...self,id:room.id},...room.peers.values()].sort((a,b)=>b.beacons-a.beacons||b.kills-a.kills)
         .map((pilot,i)=>(i+1)+'. '+pilot.name+(pilot.id===room.id?'（我）':'')+'　'+pilot.beacons+(star?' 星分 / ':' 信标 / ')+pilot.kills+' 击毁 / '+pilot.assists+' 助攻').join('\n'):'';
@@ -2067,7 +2081,7 @@ window.Cockpit = Cockpit;
       $('activity').textContent=!room.peers.size?'单人自由飞行　·　房间码 '+room.code:star?(carrier?'持星 '+(carrier.name||room.name)+'　'+star.seconds+'/8 秒':'等待持星者')+'　星分 '+self.beacons:'争夺 '+Lake.sites[beacon.site].name+' · '+beacon.left+'s　'+(beacon.count>1?'争夺中':beacon.hold?'占领 '+beacon.hold.toFixed(1)+'/4s':beacon.count?'有人占领':'空闲')+'　信标分 '+self.beacons;
     }else{
       const harbor=room.harbor;
-      $('activity').textContent=(Airfields.at(body.pos[0],body.pos[2])||visitedFields.size?'转场收集 '+visitedFields.size+'/3　':'')+(trial.next?'云梯计时 '+trial.time.toFixed(1)+'s · 下一环 '+trial.next+'/2':trial.best?'云梯最佳 '+trial.best.toFixed(2)+'s':chart.selected>=9?site.note:'向南穿桥开始计时')+
+      $('activity').textContent=(Airfields.at(body.pos[0],body.pos[2])||visitedFields.size?'转场收集 '+visitedFields.size+'/3　':'')+(trial.next?trial.course.name+'计时 '+trial.time.toFixed(1)+'s · 下一环 '+trial.next+'/2':trial.best.has(chart.selected)?site.name+'最佳 '+trial.best.get(chart.selected).toFixed(2)+'s':chart.selected>=9?site.note:'向南穿桥开始计时')+
         (harbor?'　灯港 '+harbor.count+' 架 · '+harbor.seconds+'/5s · 集结 '+harbor.rallies+' 次':'');
     }
     if(room.mode==='pvp' && self){
@@ -2091,8 +2105,9 @@ window.Cockpit = Cockpit;
       nozzle=spec.vector===3?'　喷口 左 '+degrees(.50*(pitch-roll))+' / 右 '+degrees(.50*(pitch+roll))+'　侧摆 '+degrees(.42*(rig[7]||0)):'　喷口俯仰 '+degrees(.50*pitch);
     }
     $('trait-state').textContent=(watched?'观测 '+watched.name+'　':'')+(S.view===3&&orbit.anchor?'定点观测':VIEWS[S.view])+'　/　'+(active?'V ':'')+spec.trait+
-      (active?(rig[6]>.06?' · 已展开':' · 待命'):'')+(!watched&&type==='pulse'?'　电量 '+Math.round(body.charge*100)+'%':'')+
-      nozzle+(!watched&&spec.vector?'　迎角 '+Math.round(body.alpha*180/Math.PI)+'°':'');
+      (active?(spec.unstable?(rig[6]>.5?' · 增稳放宽':' · 自动增稳'):(rig[6]>.06?' · 已展开':' · 待命')):'')+(!watched&&type==='pulse'?'　电量 '+Math.round(body.charge*100)+'%':'')+
+      (spec.canard?'　前翼 左 '+Math.round(-Flight.canardAngle(spec,rig[0],rig[2],rig[6],-1)*180/Math.PI)+'° / 右 '+Math.round(-Flight.canardAngle(spec,rig[0],rig[2],rig[6],1)*180/Math.PI)+'°':'')+
+      nozzle+(!watched&&(spec.vector||spec.unstable)?'　迎角 '+Math.round(body.alpha*180/Math.PI)+'°':'');
   }
 
   const audio=new FlightAudio(Sight.gunRate);

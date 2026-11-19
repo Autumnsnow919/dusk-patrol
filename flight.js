@@ -27,10 +27,26 @@ const Flight = (() => {
   fleet.opal={...fleet.skate,name:'星斑 X-3',role:'三轴特技',mass:3350,area:30,cruise:158,thrust:28000,roll:4.8,inertia:[3900,7200,6200]};
   fleet.lance={...fleet.kite,name:'赤翎 D-2',role:'二维高速',mass:5200,area:26,cruise:211,thrust:53000,pitch:2.3,roll:3.1,inertia:[7800,12000,10400]};
   fleet.loom={...fleet.heron,name:'织云 R-5',role:'联翼巡游',mass:2940,area:39,cruise:111,thrust:18700,roll:2.8,inertia:[4100,8700,6800]};
-  const highPower={swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
+  fleet.nocturne={...fleet.delta,name:'夜枭 N-6',role:'六代无尾概念机',mass:7200,area:47,cruise:204,thrust:51000,roll:3.2,pitch:2.05,inertia:[10200,21800,17200],elevon:true};
+  fleet.ember={...fleet.petrel,name:'火燕 U-1',role:'纵向静不稳定验证机',mass:3500,area:29,cruise:164,thrust:33000,roll:4.6,pitch:2.8,inertia:[3500,8600,6400],unstable:1.4,elevon:true};
+  fleet.tandem={...fleet.tern,name:'蜻蜓 T-4',role:'串列翼巡游',mass:2150,area:36,cruise:83,thrust:8700,roll:2.7,pitch:1.85,inertia:[2900,6500,4900]};
+  fleet.delta.elevon=true;
+  // Hinge height and station in mesh units, followed by differential and lift-mode travel.
+  for(const [type,y,z,mix,lift] of [
+    ['kite',.24,4.62,.13,0],['pulse',.24,4.62,0,0],['petrel',.24,4.62,.19,0],['aurora',.24,4.62,.12,0],
+    ['lance',.4,5.42,0,0],['wisp',.52,4.2,0,.32],['ember',.42,4.7,.23,0],['tandem',.85,3.6,0,.22]
+  ])fleet[type].canard={y,z,mix,lift};
+  function canardAngle(spec,pitch,roll,deploy,side){
+    const c=spec.canard;
+    return clamp(-.48*pitch-c.mix*roll*side-c.lift*deploy,-.67,.67);
+  }
+  const highPower={nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
     needle:16000,delta:90000,petrel:65000,aurora:99000,spire:80000,skate:74000,wisp:70000,opal:70000,lance:81000};
   for(const [type,boost] of Object.entries(highPower))fleet[type].highPower=boost;
   const cards={
+    nocturne:['分裂减速舵','无尾折线翼以升降副翼俯仰、滚转。按住 V 张开双侧翼梢减速舵，配合 Q/E 差动转向。',[9.2,.18,-5.3],[.42,.47,.62]],
+    ember:['纵向静不稳定','默认电传以鸭翼修正迎角扰动。按住 V 逐步放宽增稳，松开 V 恢复辅助；用 W/S 感受同一架飞机的差别。',[6.8,.34,-3.8],[.92,.39,.27]],
+    tandem:['串列增升翼','前后两对翼面前后错开。W/S 调整前翼迎角，V 增大前翼安装角，适合低速穿门。',[8.1,.2,-4.5],[.46,.78,.64]],
     opal:['轻型三维矢量','V 配合 W/S、Q/E、A/D 混合控制俯仰、偏航和滚转。轻机体对差动喷口反应快。',[7.4,.9,-2.4],[.39,.82,.68]],
     lance:['二维矢量','V 配合 W/S 使双喷口上下偏转。窄翼、长机身，适合高速纵向机动。',[5.4,-.2,-4.6],[.95,.44,.32]],
     loom:['俯仰增稳','V 增加俯仰阻尼，适合贴着起伏地形平稳观景。',[10.6,1.3,-.5],[.76,.74,.92]],
@@ -133,7 +149,7 @@ const Flight = (() => {
       if(body.charge===0)body.empty=true;
     }
     body.deploy+=((engage?1:0)-body.deploy)*(1-Math.exp(-5*dt));
-    const flaps=(body.type==='tern'||body.type==='delta'||body.type==='wisp')?body.deploy:0,brake=body.type==='osprey'?body.deploy:0;
+    const flaps=(body.type==='tern'||body.type==='delta'||body.type==='wisp'||body.type==='tandem')?body.deploy:0,brake=(body.type==='osprey'||body.type==='nocturne')?body.deploy:0;
     const fan=body.type==='manta'?body.deploy:0, sprint=body.type==='pulse'?body.deploy:0;
     const rho=density(body.pos[1]), pressureArea = .5*rho*speed*speed*spec.area;
     const separated = clamp((Math.abs(alpha)-spec.stall)/.25,0,1);
@@ -178,9 +194,10 @@ const Flight = (() => {
     const rates=body.rates,controls=body.controls,inertia=spec.inertia,oldPitch=rates[0],oldYaw=rates[1],oldRoll=rates[2];
     const gain=1-Math.exp(-dt*6),effective=(1-.52*separated)*(.4+.6*c.tail/100),damping=(.18+Math.sqrt(authority))*(body.type==='heron'?1+body.deploy*1.6:1);
     body.pitchTrim=clamp(body.pitchTrim+(command.trim||0)*.18*dt,-.65,.65);
-    controls[0]+=(clamp(command.pitch+body.pitchTrim,-1,1)-controls[0])*gain;controls[1]+=(-command.yaw-controls[1])*gain;controls[2]+=(-command.roll-controls[2])*gain;
-    rates[0]+=dt*(authority*(controls[0]*spec.pitch*effective-2.9*sinAlpha)+body.vector*body.engine*(.15+.85*c.engine/100)*(body.type==='aurora'?4.6:7)-1.9*damping*oldPitch-oldYaw*oldRoll*(inertia[2]-inertia[1])/inertia[0]);
-    rates[1]+=dt*(authority*(controls[1]*(body.type==='gull'?.77+.89*body.deploy:.77)*effective-1.9*slipSin)-1.75*damping*(body.type==='spire'?1+body.deploy:1)*oldYaw-oldRoll*oldPitch*(inertia[0]-inertia[2])/inertia[1]);
+    const feedback=spec.unstable?-(2.9+spec.unstable)*sinAlpha*(1-body.deploy)/spec.pitch:0;
+    controls[0]+=(clamp(command.pitch+body.pitchTrim+feedback,-1,1)-controls[0])*gain;controls[1]+=(-command.yaw-controls[1])*gain;controls[2]+=(-command.roll-controls[2])*gain;
+    rates[0]+=dt*(authority*(controls[0]*spec.pitch*effective+(spec.unstable||-2.9)*sinAlpha)+body.vector*body.engine*(.15+.85*c.engine/100)*(body.type==='aurora'?4.6:7)-1.9*damping*oldPitch-oldYaw*oldRoll*(inertia[2]-inertia[1])/inertia[0]);
+    rates[1]+=dt*(authority*(controls[1]*(body.type==='gull'?.77+.89*body.deploy:body.type==='nocturne'?.77+.64*body.deploy:.77)*effective-1.9*slipSin)-1.75*damping*(body.type==='spire'?1+body.deploy:1)*oldYaw-oldRoll*oldPitch*(inertia[0]-inertia[2])/inertia[1]);
     rates[2]+=dt*(authority*(controls[2]*spec.roll*(body.type==='swift'?1+.42*body.deploy:1)*effective+.5*slipSin+.008*(c.leftWing-c.rightWing)+(body.type==='petrel'?1.8*controls[1]*body.deploy:0))-1.65*damping*oldRoll-oldPitch*oldYaw*(inertia[1]-inertia[0])/inertia[2]);
     if(spec.vector===3){
       const power=dt*body.engine*(.15+.85*c.engine/100);
@@ -204,6 +221,6 @@ const Flight = (() => {
     body.load=body.grounded?1:(accelX*axis.u[0]+accelY*axis.u[1]+accelZ*axis.u[2])/9.81;
   }
   function rig(b){return [...b.controls,b.gear,b.vector,b.engine,b.deploy,b.vecYaw,b.vecRoll];}
-  return { fleet, rig, create, approach, axes, step, density,soundSpeed,thermal,boomMargin,tick: 1/120 };
+  return { fleet, canardAngle, rig, create, approach, axes, step, density,soundSpeed,thermal,boomMargin,tick: 1/120 };
 })();
 if (typeof module !== 'undefined') module.exports = Flight;

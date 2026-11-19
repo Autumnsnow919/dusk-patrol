@@ -82,6 +82,18 @@ class DuelScope {
     for(const event of room.events){
       const age=(now-event.born)/1000,from=project(event.a),to=project(event.b);
       g.strokeStyle=event.kind==='laser'?teal:gold;
+      if(event.kind==='echo' && age<1){
+        g.strokeStyle='#d5a2ff';
+        const edge=project(event.a.map((v,i)=>v+155*cam.B.r[i]));
+        if(from && edge)circle(from,Math.max(3,Math.abs(edge[0]-from[0])));
+        circle(from,4+10*(1-age));
+      }
+      if(event.kind==='chime' && age<.5){g.strokeStyle='#e5c8ff';circle(from,8+96*age);}
+      if((event.kind==='arc'||event.kind==='arcHop') && age<.32 && from && to){
+        g.strokeStyle=event.kind==='arc'?'#abfff0':'#f9df93';
+        const mx=(from[0]+to[0])/2,my=(from[1]+to[1])/2;
+        path([from,[mx+3,my-5],[mx-2,my+4],to]);circle(to,4+age*25);
+      }
       if(event.kind==='glyph' && age<1.2){
         g.strokeStyle='#f5aedc';circle(to,8+25*(1-age/1.2));
         if(room.id===event.to)label('染光印 · 飞离印记',w*.5-55,h*.26,g.strokeStyle);

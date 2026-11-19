@@ -35,8 +35,9 @@ const Airfields = (() => {
     return 'fuselage';
   }
   function brush(a,b,both=true){
-    const dx=b.pos[0]-a.pos[0],dy=b.pos[1]-a.pos[1],dz=b.pos[2]-a.pos[2],dist=Math.hypot(dx,dy,dz);
-    if(dist>29)return;
+    const dx=b.pos[0]-a.pos[0],dy=b.pos[1]-a.pos[1],dz=b.pos[2]-a.pos[2],dist2=dx*dx+dy*dy+dz*dz;
+    if(dist2>29*29)return;
+    const dist=Math.sqrt(dist2);
     const n=dist>.01?[dx/dist,dy/dist,dz/dist]:[1,0,0];
     const radius=body=>{
       const dot=v=>n[0]*v[0]+n[1]*v[1]+n[2]*v[2];

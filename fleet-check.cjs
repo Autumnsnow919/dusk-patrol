@@ -11,8 +11,34 @@ function run(type,frames,input){
   assert(body.pos.every(Number.isFinite));return body;
 }
 const atSpeed=body=>Math.hypot(...body.vel);
-assert.equal(types.length,21);
+assert.equal(types.length,24);
 const Pose=require('./peer-pose.js');
+const {buildPlane}=require('./airframes.js');
+for(const [id,spec] of Object.entries(Flight.fleet)){
+  const data=buildPlane(id).data;
+  const sides=new Set();
+  for(let n=9;n<data.length;n+=10)if(data[n]===19)sides.add(Math.sign(data[n-9]));
+  assert.equal(sides.size,spec.canard?2:0,id+' moving foreplanes');
+  if(!spec.canard)continue;
+  for(const side of sides){
+    assert(Flight.canardAngle(spec,1,0,0,side)<-.4);
+    assert(Flight.canardAngle(spec,-1,0,0,side)>.4);
+  }
+  const differential=Flight.canardAngle(spec,0,1,0,1)-Flight.canardAngle(spec,0,1,0,-1);
+  assert.equal(Math.abs(differential),2*spec.canard.mix);assert(differential<=0);
+}
+function disturbed(relaxed){
+  const b=Flight.create('ember',[0,1500,0],0);
+  b.quat=[Math.sin(.09),0,0,Math.cos(.09)];b.deploy=+relaxed;
+  for(let i=0;i<60;i++)Flight.step(b,{...neutral,vector:relaxed},Flight.tick);
+  return b;
+}
+const aided=disturbed(false),relaxed=disturbed(true);
+assert(aided.rates[0]<0 && relaxed.rates[0]>0 && aided.alpha<relaxed.alpha);
+assert(aided.controls[0]<-.05 && relaxed.controls[0]===0);
+assert(atSpeed(run('nocturne',120,{vector:true}))<atSpeed(run('nocturne',120,{}))-8);
+assert(run('tandem',120,{vector:true}).pos[1]>run('tandem',120,{}).pos[1]+1);
+
 for(const type of ['kite','lance','skate','aurora','opal']){
   const three=Flight.fleet[type].vector===3;
   for(const [axis,field,rate,sign] of [['pitch','vector',0,1],['yaw','vecYaw',1,-1],['roll','vecRoll',2,-1]]){
@@ -133,7 +159,7 @@ async function networkCheck(){
     assert.deepEqual(tourPeer.rig,tourPose.rig);assert.equal(tourPeer.type,'opal');
     for(const [i,type] of types.slice(7).entries())assert.equal((await join(type,'pvp','EXTRA'+Math.floor(i/8))).status,200);
     const tickets=await Promise.all([...types.slice(0,7),'kite'].map(type=>join(type)));
-    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===9));
+    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===10));
     assert.equal((await join('swift')).status,409);
     const results=await Promise.all(tickets.map(ticket=>call('sync',{controls:{...neutral,vector:true,pitch:1},weapon:'gun',type:'untrusted'},ticket.token)));
     results.forEach((state,index)=>{assert.equal(state.self.type,tickets[index].type);assert.equal(state.peers.length,7);});
@@ -141,4 +167,4 @@ async function networkCheck(){
     assert.equal((await join('rv8a','tour','LAKE')).status,200);
   }finally{await new Promise(ok=>server.close(ok));}
 }
-networkCheck().then(()=>console.log('PASS: 21 selectable PvP aircraft, traits, authoritative respawns, 8-player LAN room, orbit/flyby and terrain clearance')).catch(err=>{console.error(err);process.exitCode=1;});
+networkCheck().then(()=>console.log('PASS: 24 selectable PvP aircraft, traits, authoritative respawns, 8-player LAN room, orbit/flyby and terrain clearance')).catch(err=>{console.error(err);process.exitCode=1;});

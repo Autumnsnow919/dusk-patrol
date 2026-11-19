@@ -87,7 +87,7 @@ function posed(vertex,mat,b){
   }
   if(mat===6||mat===8){
     const hinge=mat===6?(prop?-5.3:-7.4):Flight.fleet[b.type].tip[2]-(prop?1.35:1);
-    rotate(1,2,0,hinge,mat===6?.42*pitch:-.42*roll*Math.sign(p[0])+(b.type==='delta'?.42*pitch:0));
+    rotate(1,2,0,hinge,mat===6?.42*pitch:-.42*roll*Math.sign(p[0])+(Flight.fleet[b.type].elevon?.42*pitch:0));
   }else if(mat===7){
     const axis=Math.abs(p[0])>1?Math.sign(p[0])*(1.35+.35*(p[1]-.55)):0;
     rotate(0,2,axis,prop?-6.25:-7.55,-.48*yaw);
@@ -103,7 +103,10 @@ function posed(vertex,mat,b){
     if(b.vecYaw)rotate(0,2,Math.sign(p[0])*1.32,-8.4,.42*b.vecYaw);
   }else if(mat===15||mat===16)rotate(1,2,.45,mat===15?-2.8:-3.5,(mat===15?-.58:.92)*b.deploy);
   else if(mat===17){p[1]+=.48*b.deploy;rotate(0,2,Math.sign(p[0])*3.3,0,b.propPhase||0);}
-  else if(mat===19)rotate(1,2,.5,4.2,-.36*b.deploy+.22*pitch);
+  else if(mat===19){
+    const spec=Flight.fleet[b.type],c=spec.canard;
+    rotate(1,2,c.y,c.z,Flight.canardAngle(spec,pitch,roll,b.deploy,Math.sign(p[0])));
+  }else if(mat===20||mat===21)rotate(1,2,.2,-4.8,(mat===20?1:-1)*(.53-.33*Math.sign(p[0])*yaw)*b.deploy);
   return p.map(n=>n*1.3);
 }
 function contact(shot,type,start,end,basis,body){

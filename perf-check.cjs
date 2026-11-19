@@ -5,6 +5,7 @@ const directory = process.argv[2] ? path.resolve(process.argv[2]) : __dirname;
 const {Arena} = require(path.join(directory, 'arena.cjs'));
 const Flight = require(path.join(directory, 'flight.js'));
 const compact = fs.existsSync(path.join(directory, 'peer-pose.js'));
+const selfRows=compact && typeof require(path.join(directory,"peer-pose.js")).packSelf==="function";
 const bytes = value => Buffer.byteLength(JSON.stringify(value));
 const controls = {pitch:0, yaw:0, roll:0, throttle:0, vector:false, gear:false, brake:false, trim:0};
 
@@ -24,8 +25,9 @@ function sample(count, fire, altitude) {
         const {p} = client;
         const command = {controls, weapon:'gun', target:null, fire, tap:false, dodge:false, after:0, seenTracer:client.seen};
         if (compact) command.known = client.known;
+        if(selfRows)command.compactSelf=true;
         arena.input(p, command);
-        const reply = arena.snapshot(p, 0, client.seen, command.known);
+        const reply = arena.snapshot(p, 0, client.seen, command.known, selfRows);
         client.seen = reply.tracerSeq;
         if (compact) client.known = reply.peers.map(row => row[0]);
         traffic += bytes(command) + bytes(reply);

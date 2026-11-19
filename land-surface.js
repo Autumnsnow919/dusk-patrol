@@ -5,16 +5,20 @@ class LandSurface {
     this.gl=gl;this.program=program;
     const vertices=[],indices=[],half=24;
     for(let level=0;level<6;level++){
-      const step=2**(level-1),width=half*2+1,start=vertices.length/4;
+      const step=2**(level-1),width=half*2+1,grid=new Uint16Array(width*width);
       for(let z=-half;z<=half;z++)for(let x=-half;x<=half;x++){
+        // Interior vertices of an outer ring are never indexed. Keep its seam on both sides.
+        if(level && Math.abs(x)<half/2 && Math.abs(z)<half/2)continue;
+        grid[(z+half)*width+x+half]=vertices.length/4;
         const edge=level<5;
         const stitchX=edge&&Math.abs(z)===half&&Math.abs(x)%2===1?step:0;
         const stitchZ=edge&&Math.abs(x)===half&&Math.abs(z)%2===1?step:0;
         vertices.push(x*step,z*step,stitchX,stitchZ);
-        if(x===half||z===half)continue;
+      }
+      for(let z=-half;z<half;z++)for(let x=-half;x<half;x++){
         if(level && x>=-half/2 && x<half/2 && z>=-half/2 && z<half/2)continue;
-        const a=start+(z+half)*width+x+half,b=a+width;
-        indices.push(a,b,a+1,a+1,b,b+1);
+        const a=(z+half)*width+x+half,b=a+width;
+        indices.push(grid[a],grid[b],grid[a+1],grid[a+1],grid[b],grid[b+1]);
       }
     }
     this.offsets=new Float32Array(vertices);this.pos=new Float32Array(vertices.length/4*3);
