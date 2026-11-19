@@ -1,0 +1,381 @@
+const Flight = require('./flight.js');
+const Fields=require('./airfields.js');
+const Lake=require('./lake.js');
+const Outfit=require('./outfit.js');
+const groundAt=require('./terrain.js').makeHeightSampler();
+const Sight=require('./sight.js');
+const PeerPose=require('./peer-pose.js');
+const Bolts=require('./bolts.cjs');
+const Contact=require('./contacts.cjs');
+const weapons = {
+  glyph:{wait:4.2,range:700,damage:30},prism:{wait:6.5},
+  pulse: {range:290,wait:3.6,damage:23},
+  gun: { range: 620, wait: 1/Sight.gunRate, damage: 2 },
+  missile:Sight.profiles.missile,ribbon:Sight.profiles.ribbon,
+  laser: { range: 950, wait: 4, damage: 100 }
+};
+const silent = {pitch:0,roll:0,yaw:0,throttle:0};
+const spawnHeading=slot=>slot*Math.PI/4+Math.PI+.30;
+function spawn(slot,type) {
+  const angle=slot*Math.PI/4;
+  return Flight.create(type,[900+680*Math.sin(angle),1050,1500-680*Math.cos(angle)],spawnHeading(slot));
+}
+const rounded=(vector,scale)=>vector.map(value=>Math.round(value*scale)/scale);
+class Arena {
+  constructor(now,rule='beacon') {
+    this.rule=rule;this.starId=null;this.starTime=0;
+    this.time=0; this.matchTime=0; this.last=now; this.acc=0; this.players=new Map(); this.events=[]; this.tracers=[];this.tracerId=0;this.shots=[]; this.shotId=0; this.serial=0; this.holder=null; this.hold=0; this.zoneCount=0;
+  }
+  add(id,type='comet',name=id) {
+    if(!Object.hasOwn(Flight.fleet,type)||!Flight.fleet[type].pvp)throw new Error('Invalid arena airframe');
+    Contact.prepare(type);
+    const slots=new Set([...this.players.values()].map(player=>player.slot));
+    const slot=[0,4,2,6,1,5,3,7].find(value=>!slots.has(value));
+    const player={id,type,slot,name,assists:0,kills:0,deaths:0,life:0,kit:Outfit.standard,beacons:0,refitAt:0};
+    this.players.set(id,player); this.reset(player);
+    return player;
+  }
+  reset(player) {
+    Object.assign(player,{body:spawn(player.slot,player.type),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:12,flareChargeAt:0,
+      tags:new Map(),acquire:0,lockLife:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
+  }
+  remove(id) {
+    this.tracers=this.tracers.filter(t=>t.owner!==id);
+    this.players.delete(id); this.shots=this.shots.filter(shot=>shot.from!==id&&shot.to!==id);
+    if(this.players.size<2){
+      this.holder=null; this.hold=0; this.zoneCount=0; this.starId=null; this.starTime=0;
+    }
+  }
+  input(player,data) {
+    const controls={};
+    for(const axis of Object.keys(silent)) {
+      if(![-1,0,1].includes(data.controls?.[axis])) return false;
+      controls[axis]=data.controls[axis];
+    }
+    if(!Object.hasOwn(weapons,data.weapon)) return false;
+    if(data.controls.vector!==undefined && typeof data.controls.vector!=='boolean')return false;
+    if(data.controls.trim!==undefined && ![-1,0,1].includes(data.controls.trim))return false;
+    controls.trim=data.controls.trim||0;
+    controls.vector=data.controls.vector===true;
+    for(const key of ['gear','brake']){
+      if(data.controls[key]!==undefined && typeof data.controls[key]!=='boolean')return false;
+      controls[key]=data.controls[key];
+    }
+    if(data.kit!==undefined){
+      if(!Outfit.valid(data.kit))return false;
+      if(player.kit!==data.kit){
+        player.kit=data.kit;player.refitAt=this.players.size<2?this.time:this.time+5;
+        player.laser=0;player.acquire=0;player.fire=false;
+        if(!Outfit.has(player.kit,player.weapon))player.weapon=Outfit.first(player.kit);
+      }
+    }
+    if(player.hp<=0) return true;
+    const equipped=Outfit.has(player.kit,data.weapon);
+    if(player.target!==data.target || player.weapon!==data.weapon)player.acquire=0;
+    if(player.target!==data.target || player.weapon!==data.weapon || !data.fire) player.laser=0;
+    player.controls=controls; if(equipped)player.weapon=data.weapon; player.target=typeof data.target==='string'?data.target:null;
+    player.tap=equipped && data.weapon==='gun' && data.tap===true;
+    player.fire=equipped && data.fire===true; player.lastInput=this.time;
+    if(data.dodge===true && this.time>=player.dodgeAt && !player.puffs && player.flareCells){
+      player.puffs=Math.min(3,player.flareCells);
+      player.dodgeAt=this.time+1.55;
+      this.dispense(player);
+    }
+    return true;
+  }
+  dispense(player){
+    const b=player.body,{r,f,u}=b.basis;
+    player.flareCells--;player.puffs--;player.puffAt=this.time+.24;
+    if(!player.flareChargeAt)player.flareChargeAt=this.time+4;
+    const side=player.flareCells%2?1:-1;
+    const start=b.pos.map((v,i)=>v+side*r[i]*2-7*f[i]);
+    const end=start.map((v,i)=>v+b.vel[i]*.19+r[i]*side*49-f[i]*40-u[i]*18);
+    const e=this.event('flare',player,player,start,end);
+    e.c=end.map((v,i)=>v+side*18*r[i]+6*u[i]);
+    // Each coloured packet spends one arcade diversion token.
+    const shot=this.shots.find(s=>!s.diverted && s.to===player.id && s.life===player.life);
+    if(shot){Bolts.divert(shot,end);player.divertUntil=this.time+1.4;}
+  }
+  event(kind,from,to,a=from.body.pos,b=to.body.pos) {
+    this.events.push({seq:++this.serial,kind,from:from.id,to:to.id,a:a.slice(),b:b.slice(),at:this.time});
+    if(this.events.length>48) this.events.shift();
+    return this.events[this.events.length-1];
+  }
+  damage(from,to,amount,part) {
+    if(to.hp<=0 || to.shield>this.time) return;
+    if(from!==to && to.prismUntil>this.time){
+      to.prismUntil=0;this.event('refract',from,to);return;
+    }
+    if(from!==to){
+      to.tags.set(from.id,this.time);
+      Fields.wear(to.body,'fuselage',amount);
+      const zone=part||Fields.sector(to.body,from.body.pos);
+      if(zone!=='fuselage')Fields.wear(to.body,zone,amount*.8);
+    }
+    to.hp=Math.max(0,Math.min(to.hp-amount,to.body.condition.fuselage));
+    if(!to.hp) {
+      if(this.players.size>=2)to.deaths++;
+      if(from!==to) from.kills++; to.revive=this.time+2.2; to.fire=false; to.laser=0;
+      for(const [id,at] of to.tags){
+        const helper=this.players.get(id);
+        if(helper && helper!==from && this.time-at<=5)helper.assists++;
+      }
+      if(this.rule==='crown'&&to.id===this.starId){
+        this.starId=null;this.starTime=0;
+        if(from!==to&&from.hp){from.beacons+=2;this.starId=from.id;}
+      }
+      this.event('burst',from,to);
+    }
+  }
+  beaconSite(){
+    return Lake.relayOrder[Math.floor(this.matchTime/Lake.relayDuration)%Lake.relayOrder.length];
+  }
+  tick(dt) {
+    if(!this.players.size)return;
+    const competitive=this.players.size>=2;
+    const previousSite=this.beaconSite();
+    this.time+=dt;
+    if(competitive)this.matchTime+=dt;
+    const site=this.beaconSite();
+    if(site!==previousSite){this.holder=null;this.hold=0;}
+    let occupant=null, count=0;
+    for(const player of this.players.values()) {
+      if(!player.hp) {if(this.time>=player.revive) this.reset(player); continue;}
+      if(this.time-player.lastInput>.45) {player.controls=silent;player.fire=false;player.laser=0;}
+      for(let i=0;i<3;i++)player.priorPos[i]=player.body.pos[i];
+      Flight.step(player.body,player.controls,dt,groundAt);
+      const [east,up,south]=player.body.pos;
+      if(player.body.crashed || (!player.body.grounded && !player.body.softApproach && up<420 && up<=Math.max(0,groundAt(east,south))+3) || Lake.collide(player.body) || up>Lake.arenaCeiling || Math.hypot(east-900,south-1500)>Lake.arenaRadius) {
+        player.shield=0; this.damage(player,player,100); continue;
+      }
+      if(competitive && this.rule==='beacon' && player.shield<=this.time && Lake.inZone(player.body.pos,Lake.sites[site])){occupant=player;count++;}
+    }
+    for(const a of this.players.values())for(const b of this.players.values()){
+      if(a.slot>=b.slot || !a.hp || !b.hp || a.shield>this.time||b.shield>this.time)continue;
+      Fields.brush(a.body,b.body);
+    }
+    this.zoneCount=count;
+    const holder=count===1?occupant.id:null;
+    if(holder!==this.holder || !holder)this.hold=0;
+    this.holder=holder;
+    if(holder && (this.hold+=dt)>=4){occupant.beacons++;this.hold-=4;}
+    if(competitive && this.rule==='crown'){
+      const star=this.players.get(this.starId);
+      if(star?.hp&&star.shield<=this.time){
+        this.starTime+=dt;
+        if(this.starTime>=8){star.beacons++;this.starTime-=8;}
+      }else{
+        this.starId=null;this.starTime=0;
+        for(const pilot of this.players.values())if(pilot.hp&&pilot.shield<=this.time){this.starId=pilot.id;break;}
+      }
+    }
+    for(const pilot of this.players.values())if(pilot.hp){
+      if(pilot.body.crashed || pilot.body.condition.fuselage===0){pilot.shield=0;this.damage(pilot,pilot,100);}
+      else pilot.hp=pilot.body.condition.fuselage;
+    }
+    const hits=[];
+    for(const player of this.players.values()) {
+      if(player.hp && player.puffs && player.puffAt<=this.time)this.dispense(player);
+      if(player.flareChargeAt && player.flareChargeAt<=this.time){
+        player.flareCells=Math.min(12,player.flareCells+1);
+        player.flareChargeAt=player.flareCells<12?this.time+4:0;
+      }
+      if(player.hot || this.time-player.lastGun>.28)player.heat=Math.max(0,player.heat-dt*.32);
+      if(player.hot && player.heat<=.2)player.hot=false;
+      const other=this.players.get(player.target), spec=weapons[player.weapon];
+      const mark=player.glyph;
+      if(mark && this.time>=mark.until){
+        const peer=this.players.get(mark.id);
+        if(peer?.hp && peer.life===mark.life){
+          this.event('bloom',player,peer,mark.pos,mark.pos);
+          if(Math.hypot(...peer.body.pos.map((v,i)=>v-mark.pos[i]))<=115)hits.push([player,peer,weapons.glyph.damage]);
+        }
+        player.glyph=null;
+      }
+      const available=player.hp>0 && player.refitAt<=this.time && player.shield<=this.time && this.time-player.lastInput<=.45;
+      const missile=Sight.profiles[player.weapon];
+      const tracking=available && missile && player[player.weapon+'At']<=this.time && other?.hp>0 && other!==player &&
+        other.shield<=this.time && Sight.inRing(player.body,other.body.pos,missile.ring,missile.reach,missile.inner);
+      if(!tracking || player.lockLife!==other?.life)player.acquire=0;
+      if(tracking){
+        player.lockLife=other.life;
+        player.acquire=Math.min(missile.fill,player.acquire+dt);
+      }
+      const freeGun=player.weapon==='gun' && player.hp && player.refitAt<=this.time && (available||!competitive);
+      if(freeGun && (player.fire||player.tap) && !player.hot && player.gunAt<=this.time+1e-8){
+        const b=player.body,dir=b.basis.f;
+        player.lastGun=this.time;player.gunAt=this.time+weapons.gun.wait;
+        player.heat=Math.min(1,player.heat+1/44+1e-12);player.hot=player.heat>=1;
+        const pos=b.pos.map((v,i)=>v+dir[i]*14),vel=b.vel.map((v,i)=>v+dir[i]*Sight.streakSpeed);
+        const id=++this.tracerId;
+        player.gunCount++;
+        this.tracers.push({id,owner:player.id,life:player.life,pos,vel,age:0,
+          spawn:[id,Math.round((this.time-dt)*1000),...rounded(pos,10),...rounded(vel,10)]});
+      }
+      player.tap=false;
+      if(player.weapon==='gun')continue;
+      if(!available || !player.fire){player.laser=0;continue;}
+      if(player.weapon==='prism'){
+        if(player.prismAt<=this.time){
+          player.prismAt=this.time+spec.wait;player.prismUntil=this.time+1.6;this.event('prism',player,player);
+        }
+        continue;
+      }
+      if(player.weapon==='pulse'){
+        if(player.pulseAt<=this.time){
+          player.pulseAt=this.time+spec.wait;this.event('pulse',player,player);
+          for(const peer of this.players.values()){
+            if(peer!==player && peer.hp && peer.shield<=this.time &&
+              Math.hypot(...peer.body.pos.map((v,i)=>v-player.body.pos[i]))<=spec.range)hits.push([player,peer,spec.damage]);
+          }
+        }
+        continue;
+      }
+      if(!other?.hp || other===player || other.shield>this.time){player.laser=0;continue;}
+      if(player.weapon==='glyph'){
+        if(player.glyphAt<=this.time && Math.hypot(...other.body.pos.map((v,i)=>v-player.body.pos[i]))<=spec.range){
+          player.glyphAt=this.time+spec.wait;player.glyph={id:other.id,life:other.life,pos:other.body.pos.slice(),until:this.time+1.2};
+          this.event('glyph',player,other);
+        }
+        continue;
+      }
+      const point=other.body.pos;
+      if(missile){
+        if(!tracking || player.acquire<missile.fill)continue;
+      }else if(!Sight.inRing(player.body,point,.16,spec.range)){
+        player.laser=0;continue;
+      }
+      const key=player.weapon+'At';
+      if(player[key]>this.time)continue;
+      if(player.weapon==='laser' && (player.laser+=dt)<2.2)continue;
+      player[key]=this.time+spec.wait;player.laser=0;
+      this.event(player.weapon,player,other,player.body.pos,point);
+      if(missile){
+        this.shots.push(Bolts.launch(++this.shotId,player,other,player.weapon));player.acquire=0;
+      }else hits.push([player,other,spec.damage]);
+    }
+    // Finite-lived arcade streaks. Sample the short tick segment in order so scenery
+    // in front of an avatar absorbs the shot first, even on a fast crossing.
+    const contacts=[];
+    for(const shot of this.shots){
+      const target=this.players.get(shot.to),from=this.players.get(shot.from);
+      if(!target?.hp || target.life!==shot.life){contacts.push({at:0,kind:'fade',shot,from});continue;}
+      const ended=Bolts.move(shot,target,dt),wall=Bolts.obstacle(shot);
+      if(wall<=1 || ended)contacts.push({at:Math.min(wall,1),kind:'fade',shot,from});
+      for(const peer of this.players.values()){
+        if(!peer.hp||peer===from||peer.shield>this.time)continue;
+        const at=Contact.plane(shot,peer.body,peer.priorPos);
+        if(at<=1)contacts.push({at,kind:'hit',shot,from,peer});
+      }
+    }
+    const nearby=[];
+    for(let i=this.tracers.length-1;i>=0;i--){
+      const t=this.tracers[i],owner=this.players.get(t.owner);
+      t.age+=dt;
+      let done=!owner || owner.life!==t.life || t.age>Sight.streakLife;
+      t.vel[1]-=18*dt;
+      const [px,py,pz]=t.pos,ex=t.vel[0]*dt,ey=t.vel[1]*dt,ez=t.vel[2]*dt;
+      if(!done && this.shots.length){
+        const end=[px+ex,py+ey,pz+ez];
+        for(const shot of this.shots){
+          const at=Contact.tracer(shot,t.pos,end);
+          if(at<=1)contacts.push({at,kind:'intercept',shot,t,from:owner});
+        }
+      }
+      const scenery=Math.min(py,py+ey)<=Math.max(420,Lake.sceneryTop+1);
+      nearby.length=0;
+      for(const peer of this.players.values()){
+        if(peer===owner || !peer.hp || peer.shield>this.time)continue;
+        const p=peer.body.pos;
+        if(Math.abs(p[0]-px)<=16+Math.abs(ex) && Math.abs(p[1]-py)<=16+Math.abs(ey) &&
+           Math.abs(p[2]-pz)<=16+Math.abs(ez))nearby.push(peer);
+      }
+      if(!done && !scenery && !nearby.length){
+        t.pos[0]+=ex;t.pos[1]+=ey;t.pos[2]+=ez;continue;
+      }
+      const steps=Math.max(1,Math.ceil(Math.hypot(ex,ey,ez)/3)),slice=dt/steps;
+      for(let k=0;!done && k<steps;k++){
+        for(let d=0;d<3;d++)t.pos[d]+=slice*t.vel[d];
+        const [x,y,z]=t.pos,field=y<185 && Fields.at(x,z);
+        if((y<420 && y<=Math.max(0,groundAt(x,z))) || (field && Math.abs(y-field.y)<2.5) || (scenery && Lake.touches(t.pos,.5))){done=true;contacts.push({at:(k+1)/steps,kind:'wall',t});break;}
+        for(const peer of nearby){
+          const b=peer.body,dx=x-b.pos[0],dy=y-b.pos[1],dz=z-b.pos[2];
+          if(dx*dx+dy*dy+dz*dz>245)continue;
+          const dot=a=>dx*a[0]+dy*a[1]+dz*a[2];
+          if((dot(b.basis.r)/(b.span+1))**2+(dot(b.basis.u)/3.5)**2+(dot(b.basis.f)/12)**2>1)continue;
+          contacts.push({at:(k+1)/steps,kind:'spark',t,peer,from:owner,point:t.pos.slice()});
+          done=true;break;
+        }
+      }
+      if(done)this.tracers.splice(i,1);
+    }
+    if(contacts.length){
+      // Resolve in sub-tick order so a later intercept cannot cancel an earlier impact.
+      const spentShots=new Set(),spentRounds=new Set();
+      contacts.sort((a,b)=>a.at-b.at);
+      for(const {at,kind,shot,t,from,peer,point} of contacts){
+        if(spentShots.has(shot)||spentRounds.has(t))continue;
+        if(t)spentRounds.add(t);if(shot)spentShots.add(shot);
+        if(kind==='wall'||!from)continue;
+        const p=point||shot.prev.map((v,i)=>v+(shot.pos[i]-v)*at);
+        if(kind==='hit'||kind==='spark')hits.push([from,peer,weapons[kind==='hit'?shot.type:'gun'].damage,Fields.sector(peer.body,p)]);
+        this.event(kind,from,peer||from,p,p);
+      }
+      if(spentShots.size)this.shots=this.shots.filter(s=>!spentShots.has(s));
+      if(spentRounds.size)this.tracers=this.tracers.filter(t=>!spentRounds.has(t));
+    }
+    for(const hit of hits)this.damage(...hit);
+  }
+  advance(now) {
+    this.acc+=Math.max(0,Math.min(.25,(now-this.last)/1000));this.last=now;
+    while(this.acc+1e-12>=Flight.tick) {this.tick(Flight.tick);this.acc-=Flight.tick;}
+  }
+  snapshot(player,after,seenTracer=0,known=null) {
+    const summary=pilot=>{
+      if(!pilot.lastSummary||pilot.summaryTime!==this.time){
+        pilot.summaryTime=this.time;
+        pilot.lastSummary={gunCount:pilot.gunCount,gunning:pilot.fire && !pilot.hot && pilot.weapon==='gun' && this.time-pilot.lastGun<.075,id:pilot.id,name:pilot.name,type:pilot.type,condition:pilot.body.damaged?{...pilot.body.condition}:null,rig:rounded(Flight.rig(pilot.body),100),assists:pilot.assists,vel:rounded(pilot.body.vel,1),pos:rounded(pilot.body.pos,100),quat:rounded(pilot.body.quat,100000),hp:pilot.hp,kills:pilot.kills,deaths:pilot.deaths,beacons:pilot.beacons,life:pilot.life};
+        pilot.poseRow=null;
+      }
+      return pilot.lastSummary;
+    };
+    const remain=until=>Math.max(0,until-this.time);
+    // Consecutive live IDs compress to one pair, even during an eight-player burst.
+    if(this.tracerSnapshotTime!==this.time || this.tracerSnapshotList!==this.tracers){
+      this.tracerSnapshotTime=this.time;this.tracerSnapshotList=this.tracers;
+      const ranges=[];
+      for(const t of this.tracers){
+        if(ranges.length && ranges[ranges.length-1]===t.id-1)ranges[ranges.length-1]=t.id;
+        else ranges.push(t.id,t.id);
+      }
+      this.liveRanges=ranges;
+    }
+    let lo=0,hi=this.tracers.length;
+    while(lo<hi){const mid=(lo+hi)>>>1;if(this.tracers[mid].id<=seenTracer)lo=mid+1;else hi=mid;}
+    const births=[];
+    for(let i=lo;i<this.tracers.length;i++)births.push(this.tracers[i].spawn);
+    const peers=[];
+    for(const other of this.players.values()){
+      if(other===player)continue;
+      const peer=summary(other);
+      if(!known){peers.push(peer);continue;}
+      other.poseRow??=PeerPose.pack(peer);
+      peers.push(known.includes(peer.id)?other.poseRow:[...other.poseRow,peer.name,peer.type]);
+    }
+    return {clock:Math.round(this.time*1000),tracerSeq:this.tracerId,live:this.liveRanges,
+      tracers:births,peers,
+      self:{...summary(player),vel:rounded(player.body.vel,1000),rates:rounded(player.body.rates,10000),throttle:player.body.throttle,engine:player.body.engine,
+        condition:{...player.body.condition},service:player.body.service,damaged:player.body.damaged,pitchTrim:player.body.pitchTrim,grounded:player.body.grounded,gear:player.body.gear,gearDown:player.body.gearDown,touchdowns:player.body.touchdowns,sinkAtTouch:player.body.sinkAtTouch,prism:remain(player.prismUntil),
+        vector:player.body.vector,deploy:player.body.deploy,charge:player.body.charge,empty:player.body.empty,
+        heat:player.heat,hot:player.hot,kit:player.kit,weapon:player.weapon,refit:remain(player.refitAt),
+        star:this.rule==='crown'?{id:this.starId,seconds:Math.floor(this.starTime)}:undefined,
+        beacon:{site:this.beaconSite(),left:Math.ceil(Lake.relayDuration-this.matchTime%Lake.relayDuration),count:this.zoneCount,hold:player.id===this.holder?Math.floor(this.hold*10)/10:0},
+        lock:player.laser/2.2,shield:remain(player.shield),revive:remain(player.revive),cool:remain(player[player.weapon+'At']),
+        flares:player.flareCells,puffs:player.puffs,dodge:remain(player.dodgeAt),diverted:player.divertUntil>this.time,acquire:Math.round(100*player.acquire/(Sight.profiles[player.weapon]?.fill||1)),
+        warned:[...this.players.values()].some(p=>p.hp&&p.target===player.id&&((p.lockLife===player.life&&p.acquire>0)||p.laser>0)),
+        incoming:this.shots.some(shot=>!shot.diverted&&shot.to===player.id&&shot.life===player.life)},
+      shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type]),
+      events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
+  }
+}
+module.exports={Arena,spawnHeading};
