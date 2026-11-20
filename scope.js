@@ -24,7 +24,7 @@ class DuelScope {
       x=Math.max(2,Math.min(w-tw-5,x));g.fillStyle=ink;g.fillRect(x-2,y-12,tw+5,15);
       g.fillStyle=col;g.fillText(txt,x,y);
     }
-    const duel=room.mode==='pvp',self=room.self,basis=Flight.axes(body.quat),target=room.peers.get(room.target);
+    const duel=room.combat,self=room.self,basis=Flight.axes(body.quat),target=room.peers.get(room.target);
     const rx=w-60,ry=90,R=40;
     g.fillStyle='#18212df0';g.fillRect(rx-R-7,ry-R-7,2*R+14,2*R+23);
     g.strokeStyle='#537c79';circle([rx,ry],R);circle([rx,ry],R/2);
@@ -36,7 +36,7 @@ class DuelScope {
       if(peer.hp===0)continue;
       const p=peer.displayPos,dx=p[0]-body.pos[0],dz=p[2]-body.pos[2],scale=R/Math.max(room.weapon==='ribbon'?3600:1800,Math.hypot(dx,dz)*1.04);
       const x=Math.round(rx+dx*scale),y=Math.round(ry+dz*scale),selected=duel&&peer.id===room.target;
-      const col=selected?gold:teal;
+      const col=selected?gold:room.mode==='pve'&&room.hostile(peer)?red:teal;
       g.strokeStyle=g.fillStyle=col;
       const head=Flight.axes(peer.displayQuat,this.peerAxes).f;
       path([[x,y],[x+head[0]*6,y+head[2]*6]]);g.fillRect(x-1,y-1,3,3);

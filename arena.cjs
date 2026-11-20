@@ -7,6 +7,7 @@ const Sight=require('./sight.js');
 const PeerPose=require('./peer-pose.js');
 const Bolts=require('./bolts.cjs');
 const Contact=require('./contacts.cjs');
+const PatrolWaves=require('./waves.cjs');
 const weapons = {
   echo:{wait:5,range:155,damage:28},arc:{wait:6,range:440,jump:210,damage:18},
   glyph:{wait:4.2,range:700,damage:30},prism:{wait:6.5},
@@ -17,28 +18,30 @@ const weapons = {
 };
 function distance2(a,b){return (a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2;}
 const silent = {pitch:0,roll:0,yaw:0,throttle:0};
-const spawnHeading=slot=>slot*Math.PI/4+Math.PI+.30;
-function spawn(slot,type) {
+const spawnHeading=(slot,cooperative=false)=>cooperative?Math.PI:slot*Math.PI/4+Math.PI+.30;
+function spawn(slot,type,cooperative) {
+  if(cooperative)return Flight.create(type,[900+(slot%2?1:-1)*Math.ceil(slot/2)*45,1050,560-slot*26],spawnHeading(slot,true));
   const angle=slot*Math.PI/4;
   return Flight.create(type,[900+680*Math.sin(angle),1050,1500-680*Math.cos(angle)],spawnHeading(slot));
 }
 const rounded=(vector,scale)=>vector.map(value=>Math.round(value*scale)/scale);
 class Arena {
   constructor(now,rule='beacon') {
+    this.mission=rule==='waves'?new PatrolWaves():null;
     this.rule=rule;this.starId=null;this.starTime=0;
     this.time=0; this.matchTime=0; this.last=now; this.acc=0; this.players=new Map(); this.events=[]; this.tracers=[];this.tracerId=0;this.shots=[]; this.shotId=0; this.serial=0; this.holder=null; this.hold=0; this.zoneCount=0;
   }
-  add(id,type='comet',name=id) {
+  add(id,type='comet',name=id,botSlot=null) {
     if(!Object.hasOwn(Flight.fleet,type)||!Flight.fleet[type].pvp)throw new Error('Invalid arena airframe');
     Contact.prepare(type);
     const slots=new Set([...this.players.values()].map(player=>player.slot));
-    const slot=[0,4,2,6,1,5,3,7].find(value=>!slots.has(value));
-    const player={id,type,slot,name,assists:0,kills:0,deaths:0,life:0,kit:Outfit.standard,beacons:0,refitAt:0};
+    const slot=botSlot??[0,4,2,6,1,5,3,7].find(value=>!slots.has(value));
+    const player={id,type,slot,name,bot:botSlot!==null,assists:0,kills:0,deaths:0,life:0,kit:Outfit.standard,beacons:0,refitAt:0};
     this.players.set(id,player); this.reset(player);
     return player;
   }
   reset(player) {
-    Object.assign(player,{body:spawn(player.slot,player.type),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:12,flareChargeAt:0,
+    Object.assign(player,{body:spawn(player.slot,player.type,this.mission&&!player.bot),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:12,flareChargeAt:0,
       tags:new Map(),acquire:0,lockLife:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
   }
   remove(id) {
@@ -47,6 +50,9 @@ class Arena {
     if(this.players.size<2){
       this.holder=null; this.hold=0; this.zoneCount=0; this.starId=null; this.starTime=0;
     }
+  }
+  opponents(a,b) {
+    return b && a!==b && (!this.mission || a.bot!==b.bot);
   }
   input(player,data) {
     const controls={};
@@ -75,7 +81,8 @@ class Arena {
     const equipped=Outfit.has(player.kit,data.weapon);
     if(player.target!==data.target || player.weapon!==data.weapon)player.acquire=0;
     if(player.target!==data.target || player.weapon!==data.weapon || !data.fire) player.laser=0;
-    player.controls=controls; if(equipped)player.weapon=data.weapon; player.target=typeof data.target==='string'?data.target:null;
+    player.controls=controls; if(equipped)player.weapon=data.weapon;
+    player.target=this.opponents(player,this.players.get(data.target))?data.target:null;
     player.tap=equipped && data.weapon==='gun' && data.tap===true;
     player.fire=equipped && data.fire===true; player.lastInput=this.time;
     if(data.dodge===true && this.time>=player.dodgeAt && !player.puffs && player.flareCells){
@@ -104,7 +111,7 @@ class Arena {
     return this.events[this.events.length-1];
   }
   damage(from,to,amount,part) {
-    if(to.hp<=0 || to.shield>this.time) return;
+    if(to.hp<=0 || to.shield>this.time || (from!==to && !this.opponents(from,to))) return;
     if(from!==to && to.prismUntil>this.time){
       to.prismUntil=0;this.event('refract',from,to);return;
     }
@@ -137,12 +144,13 @@ class Arena {
     const competitive=this.players.size>=2;
     const previousSite=this.beaconSite();
     this.time+=dt;
+    this.mission?.update(this);
     if(competitive)this.matchTime+=dt;
     const site=this.beaconSite();
     if(site!==previousSite){this.holder=null;this.hold=0;}
     let occupant=null, count=0;
     for(const player of this.players.values()) {
-      if(!player.hp) {if(this.time>=player.revive) this.reset(player); continue;}
+      if(!player.hp) {if(!player.bot && this.time>=player.revive) this.reset(player); continue;}
       if(this.time-player.lastInput>.45) {player.controls=silent;player.fire=false;player.laser=0;}
       for(let i=0;i<3;i++)player.priorPos[i]=player.body.pos[i];
       Flight.step(player.body,player.controls,dt,groundAt);
@@ -153,7 +161,7 @@ class Arena {
       if(competitive && this.rule==='beacon' && player.shield<=this.time && Lake.inZone(player.body.pos,Lake.sites[site])){occupant=player;count++;}
     }
     for(const a of this.players.values())for(const b of this.players.values()){
-      if(a.slot>=b.slot || !a.hp || !b.hp || a.shield>this.time||b.shield>this.time)continue;
+      if(a.slot>=b.slot || !a.hp || !b.hp || a.shield>this.time||b.shield>this.time || !this.opponents(a,b))continue;
       Fields.brush(a.body,b.body);
     }
     this.zoneCount=count;
@@ -189,7 +197,7 @@ class Arena {
         const center=player.echo.pos;
         this.event('chime',player,player,center,center);
         for(const peer of this.players.values()){
-          if(peer!==player && peer.hp && distance2(center,peer.body.pos)<=weapons.echo.range**2)
+          if(this.opponents(player,peer) && peer.hp && distance2(center,peer.body.pos)<=weapons.echo.range**2)
             hits.push([player,peer,weapons.echo.damage]);
         }
         player.echo=null;
@@ -243,7 +251,7 @@ class Arena {
         if(player.pulseAt<=this.time){
           player.pulseAt=this.time+spec.wait;this.event('pulse',player,player);
           for(const peer of this.players.values()){
-            if(peer!==player && peer.hp && peer.shield<=this.time &&
+            if(this.opponents(player,peer) && peer.hp && peer.shield<=this.time &&
               Math.hypot(...peer.body.pos.map((v,i)=>v-player.body.pos[i]))<=spec.range)hits.push([player,peer,spec.damage]);
           }
         }
@@ -256,7 +264,7 @@ class Arena {
         this.event('arc',player,other);hits.push([player,other,spec.damage]);
         let nearest=null,best=spec.jump**2;
         for(const peer of this.players.values()){
-          if(peer===player || peer===other || !peer.hp || peer.shield>this.time)continue;
+          if(!this.opponents(player,peer) || peer===other || !peer.hp || peer.shield>this.time)continue;
           const d=distance2(other.body.pos,peer.body.pos);
           if(d<=best){nearest=peer;best=d;}
         }
@@ -294,7 +302,7 @@ class Arena {
       const ended=Bolts.move(shot,target,dt),wall=Bolts.obstacle(shot);
       if(wall<=1 || ended)contacts.push({at:Math.min(wall,1),kind:'fade',shot,from});
       for(const peer of this.players.values()){
-        if(!peer.hp||peer===from||peer.shield>this.time)continue;
+        if(!peer.hp||!from||!this.opponents(from,peer)||peer.shield>this.time)continue;
         const at=Contact.plane(shot,peer.body,peer.priorPos);
         if(at<=1)contacts.push({at,kind:'hit',shot,from,peer});
       }
@@ -309,6 +317,7 @@ class Arena {
       if(!done && this.shots.length){
         const end=[px+ex,py+ey,pz+ez];
         for(const shot of this.shots){
+          if(this.mission && !this.opponents(owner,this.players.get(shot.from)))continue;
           const at=Contact.tracer(shot,t.pos,end);
           if(at<=1)contacts.push({at,kind:'intercept',shot,t,from:owner});
         }
@@ -316,7 +325,7 @@ class Arena {
       const scenery=Math.min(py,py+ey)<=Math.max(420,Lake.sceneryTop+1);
       nearby.length=0;
       for(const peer of this.players.values()){
-        if(peer===owner || !peer.hp || peer.shield>this.time)continue;
+        if(!owner || !this.opponents(owner,peer) || !peer.hp || peer.shield>this.time)continue;
         const p=peer.body.pos;
         if(Math.abs(p[0]-px)<=16+Math.abs(ex) && Math.abs(p[1]-py)<=16+Math.abs(ey) &&
            Math.abs(p[2]-pz)<=16+Math.abs(ez))nearby.push(peer);
@@ -407,6 +416,7 @@ class Arena {
         incoming:this.shots.some(shot=>!shot.diverted&&shot.to===player.id&&shot.life===player.life)},
       shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type]),
       events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
+    if(this.mission)result.mission=this.mission.snapshot(this.time);
     if(compactSelf)result.self=PeerPose.packSelf(result.self);
     return result;
   }

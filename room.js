@@ -1,4 +1,6 @@
 class FlightRoom {
+  get combat() { return this.mode==='pvp'||this.mode==='pve'; }
+  hostile(peer) { return this.mode==='pvp'||(this.mode==='pve'&&peer.id.startsWith('ai-')); }
   constructor() {
     this.peers=new Map();this.shots=new Map();this.tracers=new Map();this.seenTracer=0; this.generation=0; this.status='单人飞行'; this.nextSync=0;
   }
@@ -10,7 +12,7 @@ class FlightRoom {
   leave() {
     if(this.token) this.request('leave',{},this.token).catch(()=>{});
     this.triggerTap=false;this.tracerTime=-Infinity;this.token=null; this.generation++; this.busy=false; this.peers.clear(); this.shots.clear();this.tracers=new Map();this.seenTracer=0;this.name=''; this.status='单人飞行';
-    this.harbor=null; this.kit=Outfit.standard; this.pendingKit=null;
+    this.harbor=null; this.mission=null; this.kit=Outfit.standard; this.pendingKit=null;
     this.mode='tour'; this.self=null; this.target=null; this.weapon='gun'; this.after=0; this.events=[]; this.dodge=false;
   }
   async join(room,type,mode='tour',name='',rule='beacon') {
@@ -24,13 +26,13 @@ class FlightRoom {
   async sync(body,now,controls,fire) {
     if(!this.token || this.busy || now<this.nextSync) return;
     const version=this.generation;
-    const duel=this.mode==='pvp';
+    const duel=this.combat;
     this.busy=true; this.nextSync=now+(duel?65:90);
     try {
       const command=duel?{controls,compactSelf:true,weapon:this.weapon,target:this.target,fire:fire||this.triggerTap,tap:this.triggerTap,dodge:this.dodge,after:this.after,seenTracer:this.seenTracer,known:[...this.peers.keys()]}:{pos:body.pos,quat:body.quat,vel:body.vel,condition:body.damaged?body.condition:undefined,rig:Flight.rig(body).map(v=>Math.round(v*100)/100)};
       if(duel && this.pendingKit!==null)command.kit=this.pendingKit;
       this.triggerTap=false;this.dodge=false;
-      const {peers,self:wireSelf,events,serial,harbor,shots,tracers,clock,tracerSeq,live}=await this.request('sync',command,this.token);
+      const {peers,self:wireSelf,events,serial,harbor,shots,tracers,clock,tracerSeq,live,mission}=await this.request('sync',command,this.token);
       if(version!==this.generation) return;
       const keep=new Set();
       for(let i=0;i<peers.length;i++){
@@ -43,7 +45,7 @@ class FlightRoom {
         else this.peers.set(peer.id,{...peer,displayPos:peer.pos,displayQuat:peer.quat});
       }
       for(const id of this.peers.keys()) if(!keep.has(id)) this.peers.delete(id);
-      this.harbor=harbor;
+      this.harbor=harbor;this.mission=mission;
       if(duel) {
         const self=Array.isArray(wireSelf)?PeerPose.unpackSelf(wireSelf,Airfields.freshCondition):wireSelf;
         for(const shot of tracers)this.tracers.set(shot[0],shot);
@@ -67,10 +69,11 @@ class FlightRoom {
         for(const event of events)this.onEffect?.(event);
         for(const event of events) this.events.push({...event,born:performance.now()});
         this.events=this.events.filter(event=>performance.now()-event.born<1450).slice(-32);
-        if(!this.peers.get(this.target)?.hp) this.target=peers.find(peer=>peer.hp)?.id??null;
+        if(!this.peers.get(this.target)?.hp) this.target=peers.find(peer=>peer.hp&&this.hostile(peer))?.id??null;
         this.onState?.(self);
       }
-      this.status=this.code+' · '+(peers.length+1)+'/8';
+      const others=this.mode==='pve'?peers.filter(p=>!this.hostile(p)).length:peers.length;
+      this.status=this.code+' · '+(others+1)+'/8';
     } catch(error) {
       if(version!==this.generation) return;
       this.peers.clear();this.shots.clear();this.tracers=new Map();this.seenTracer=0; this.tracerTime=-Infinity;this.nextSync=performance.now()+900;

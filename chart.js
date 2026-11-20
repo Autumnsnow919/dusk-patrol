@@ -17,7 +17,7 @@ class LakeChart {
     }
     ctx.putImageData(image,0,0);this.base=base;
   }
-  draw(body,room){
+  draw(body,room,patrolPosition){
     const ctx=this.ctx,n=this.canvas.width;
     if(!this.base)return;
     const span=this.overview?this.extent:7800,x0=this.overview?0:body.pos[0],z0=this.overview?0:body.pos[2];
@@ -38,14 +38,14 @@ class LakeChart {
       }
       ctx.strokeStyle='#b6c7ba';ctx.stroke();
     }
-    if(room.mode==='pvp'){
+    if(room.combat){
       ctx.setLineDash([3,5]);ctx.beginPath();ctx.arc(cx,cy,n*Lake.arenaRadius/span,0,2*Math.PI);ctx.strokeStyle='#ffd59b';ctx.stroke();ctx.setLineDash([]);
     }
     ctx.font='bold 12px sans-serif';ctx.fillStyle='#ffffda';ctx.fillText('N ↑',10,18);
-    const player=xy(body.pos),goal=xy(Lake.sites[this.selected].pos);
+    const player=xy(body.pos),goal=xy(patrolPosition||Lake.sites[this.selected].pos);
     ctx.setLineDash([3,4]);ctx.strokeStyle='#ffe4ac';ctx.beginPath();ctx.moveTo(...player);ctx.lineTo(...goal);ctx.stroke();ctx.setLineDash([]);
     Lake.sites.forEach((site,i)=>{
-      const [x,y]=xy(site.pos),active=!room.self?.star && room.self?.beacon?.site===i;
+      const [x,y]=xy(site.pos),active=room.mode==='pvp'&&!room.self?.star && room.self?.beacon?.site===i;
       if(site.length){
         const size=site.length*n/span;ctx.fillStyle='#262834';ctx.fillRect(x-3,y-size/2,6,size);
         ctx.fillStyle=site.color;for(let d=2;d<size;d+=5)ctx.fillRect(x,y-size/2+d,1,2);
@@ -60,7 +60,7 @@ class LakeChart {
     });
     for(const peer of room.peers.values()){
       if(peer.hp===0)continue;
-      const [x,y]=xy(peer.pos);ctx.fillStyle=room.mode==='pvp'?'#ff956e':'#8ee7e6';ctx.fillRect(x-2,y-2,4,4);ctx.fillText(peer.name,x+4,y-4);
+      const [x,y]=xy(peer.pos);ctx.fillStyle=room.hostile(peer)?'#ff956e':'#8ee7e6';ctx.fillRect(x-2,y-2,4,4);ctx.fillText(peer.name,x+4,y-4);
     }
     const f=Flight.axes(body.quat).f;
     ctx.save();ctx.translate(...player);ctx.rotate(Math.atan2(f[0],-f[2]));

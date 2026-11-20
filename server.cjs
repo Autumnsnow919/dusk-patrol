@@ -48,14 +48,14 @@ function createServer() {
       if (pathname === '/join') {
         const mode=data.mode??'tour';
         let room=data.room;
-        if(mode==='pvp' && room===''){
+        if((mode==='pvp'||mode==='pve') && room===''){
           do {room=randomUUID().slice(0,6).toUpperCase();} while(rooms.has(room));
         }
         if (typeof room!=='string' || !/^[A-Z0-9-]{1,16}$/.test(room) || !Object.hasOwn(fleet,data.type)) return reply(400,{});
-        if(!['tour','pvp'].includes(mode) || (mode==='pvp' && !fleet[data.type].pvp)) return reply(400,{});
-        const rule=data.rule??'beacon';
-        if(!['beacon','crown'].includes(rule)||(mode==='tour'&&rule!=='beacon'))return reply(400,{});
-        const group=rooms.get(room)??{mode,rule,members:new Set(),arena:mode==='pvp'?new Arena(performance.now(),rule):null};
+        if(!['tour','pvp','pve'].includes(mode) || (mode!=='tour' && !fleet[data.type].pvp)) return reply(400,{});
+        const rule=data.rule??(mode==='pve'?'waves':'beacon');
+        if(!(mode==='pve'?rule==='waves':rule==='beacon'||(mode==='pvp'&&rule==='crown')))return reply(400,{});
+        const group=rooms.get(room)??{mode,rule,members:new Set(),arena:mode!=='tour'?new Arena(performance.now(),rule):null};
         if(group.mode!==mode||group.rule!==rule) return reply(409,{reason:'mode'});
         const others=[...group.members];
         if (others.length>=8 || sessions.size>=256) return reply(409,{});
@@ -70,7 +70,7 @@ function createServer() {
         group.arena?.advance(performance.now()); const fighter=group.arena?.add(id,data.type,name);
         rooms.set(room,group); group.members.add(pilot); sessions.set(token,pilot);
         return reply(200,{token,id,name,room,mode,rule,type:data.type,protocol:10,slot:fighter?.slot??others.length,lead:others.find(peer=>peer.pose)?.pose,
-          spawn:fighter?.body.pos,heading:fighter?spawnHeading(fighter.slot):undefined});
+          spawn:fighter?.body.pos,heading:fighter?spawnHeading(fighter.slot,mode==='pve'):undefined});
       }
       const token = req.headers.authorization?.replace(/^Bearer /,''), pilot = sessions.get(token);
       if (!pilot) return reply(401,{});
@@ -78,7 +78,7 @@ function createServer() {
       if(pilot.group.arena) {
         const arena=pilot.group.arena, player=arena.players.get(pilot.id); arena.advance(performance.now());
         if(!arena.input(player,data)) return reply(400,{});
-        pilot.seen=Date.now(); return reply(200,arena.snapshot(player,Number.isSafeInteger(data.after)?data.after:0,Number.isSafeInteger(data.seenTracer)?data.seenTracer:0,Array.isArray(data.known)&&data.known.length<=8?data.known:null,data.compactSelf===true));
+        pilot.seen=Date.now(); return reply(200,arena.snapshot(player,Number.isSafeInteger(data.after)?data.after:0,Number.isSafeInteger(data.seenTracer)?data.seenTracer:0,Array.isArray(data.known)&&data.known.length<=(arena.mission?11:8)?data.known:null,data.compactSelf===true));
       }
       const vector = (value,size,limit) => Array.isArray(value) && value.length===size && value.every(num=>Number.isFinite(num)&&Math.abs(num)<=limit);
       if (!vector(data.pos,3,1e7)||!vector(data.quat,4,1.01)||Math.abs(Math.hypot(...data.quat)-1)>.025) return reply(400,{});

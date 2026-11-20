@@ -109,7 +109,7 @@ body.touch .hints.at-bottom { bottom: auto; top: 56px; }
   <button type="button" id="btn-sound" class="chip corner" aria-pressed="true" title="M 切换声音">声音 开</button>
   <section id="hangar" aria-label="飞行机库">
     <form class="brief corner" id="dispatch" aria-label="出动设置">
-      <label>玩法<select id="mode"><option value="tour">编队观光</option><option value="pvp">PvP · 信标争夺</option><option value="crown">PvP · 星标追逐</option></select></label>
+      <label>玩法<select id="mode"><option value="tour">编队观光</option><option value="pve">PvE · 湖区巡逻队</option><option value="pvp">PvP · 信标争夺</option><option value="crown">PvP · 星标追逐</option></select></label>
       <label>机型<select id="airframe" aria-describedby="airframe-card"></select></label>
       <label id="depart-field">出发点<select id="depart"></select></label>
       <label id="start-field" hidden>机场出发方式<select id="start-on"><option value="ramp">跑道起飞</option><option value="final">五边进近练习</option></select></label>
@@ -1396,7 +1396,7 @@ window.Cockpit = Cockpit;
     const controls=readControls();
     if (flying && room.self?.hp!==0) accumulator += dt;
     while (accumulator + 1e-12 >= Flight.tick) {
-      const touring=room.mode!=='pvp';
+      const touring=!room.combat;
       if(touring){for(let i=0;i<3;i++)prior[i]=body.pos[i];}
       Flight.step(body,controls,Flight.tick,groundAt); accumulator -= Flight.tick;
       if(!touring)continue;
@@ -1437,7 +1437,7 @@ window.Cockpit = Cockpit;
     S.boost=body.type==='comet'?sstep(.78,1,body.engine):(body.type==='pulse'||body.type==='needle')?body.deploy:0; S.shake=REDUCED?0:S.boost;
     S.ground=Math.max(0,groundAt(S.pos[0],S.pos[2])); S.agl=S.pos[1]-S.ground; S.skim=0;
     const { L, E1, E2 } = WORLD;
-    if(room.mode!=='pvp')for (const E of [E1, E2]) {
+    if(!room.combat)for (const E of [E1, E2]) {
       const coord = S.pos[0]*E[0]+S.pos[2]*E[1];
       if(Math.abs(coord)>L*.5) shiftWorld(-Math.sign(coord)*L*E[0],-Math.sign(coord)*L*E[1]);
     }
@@ -1685,7 +1685,12 @@ window.Cockpit = Cockpit;
       craft.push([peer.type,peer.displayPos,quatBasis(peer.displayQuat),peer.rig||[0,0,0,0,0,.4,0],
         peer.vel?Math.hypot(...peer.vel)/Flight.soundSpeed(peer.pos[1]):0,peer.propPhase||0,peer.wheelPhase||0,peer.condition]);
     }
+    if(craft.length>castPositions.length/3){
+      const cameraDistance=c=>(c[1][0]-cam.pos[0])**2+(c[1][1]-cam.pos[1])**2+(c[1][2]-cam.pos[2])**2;
+      craft.sort((a,b)=>cameraDistance(a)-cameraDistance(b));
+    }
     for(const c of craft){
+      if(castCount===castPositions.length/3)break;
       const p=c[1];
       if(p[1]>Lake.sceneryTop+990*sunL[1] || Math.hypot(p[0]-cam.pos[0],p[1]-cam.pos[1],p[2]-cam.pos[2])>3600)continue;
       const lowest=p[1]-990*sunL[1];
@@ -1838,7 +1843,7 @@ window.Cockpit = Cockpit;
         partData[o+3]=(k?5.3:7.5)*(1-.55*a);partData[o+4]=Math.min(1,a);partData[o+5]=5;partData[o+6]=k;
       }
     }
-    if(room.mode==='pvp' && performance.now()-room.tracerTime<220){
+    if(room.combat && performance.now()-room.tracerTime<220){
       const phase=.5+.5*Math.cos(2*Math.PI*Sight.gunRate*S.time);
       function muzzle(p,f){
         const o=n++*7;
@@ -1870,7 +1875,7 @@ window.Cockpit = Cockpit;
 
   // ── input ──
   function nearest(pos, anchor) {
-    if(room.mode==='pvp')return pos;
+    if(room.combat)return pos;
     const result = pos.slice();
     for(const direction of [WORLD.E1,WORLD.E2]) {
       const distance=(result[0]-anchor[0])*direction[0]+(result[2]-anchor[2])*direction[1];
@@ -1882,7 +1887,7 @@ window.Cockpit = Cockpit;
   function updateHints() {
     if(S.view===3){
       $('hints').textContent=(orbit.anchor?'定点观测 · G 恢复环绕':'自由环绕 · 方向键转镜头　G 定点观测')+'　I 前方通场机位　[ / ] 缩放　0 侧视复位　C 返回';
-    }else $('hints').textContent=(room.mode==='pvp'?'1–6、8、9、− 武器　J 开火　T 目标　X 热诱弹　L 配装　B 导航':'W/S 俯仰　 A/D 滚转　 Q/E 偏航　 R/F 油门')+'　U 起落架　Z 轮刹　7 机体　N 航图　K 航点　C 镜头　H 机库';
+    }else $('hints').textContent=(room.combat?'1–6、8、9、− 武器　J 开火　T 目标　X 热诱弹　L 配装　B 导航':'W/S 俯仰　 A/D 滚转　 Q/E 偏航　 R/F 油门')+'　U 起落架　Z 轮刹　7 机体　N 航图　K 航点　C 镜头　H 机库';
   }
   function park() {
     inspectParts=false;damageUntil=0;$('damage-panel').hidden=true;
@@ -1914,7 +1919,7 @@ window.Cockpit = Cockpit;
     $('airframe').value=choices.some(([id])=>id===previous)?previous:duel?'kite':'comet';
     $('depart-field').hidden=duel;fieldMenu();
     $('channel').placeholder=duel?'留空创建，或输入朋友的房间码':'留空单飞，例如 LAKE';
-    $('brief-mode').textContent=$('mode').value==='crown'?'持星每 8 秒得分　·　击毁持星者立即夺星':duel?'同房间码加入对战　·　7 点配装　·　X 热诱弹':'房间码留空单飞　·　同码编队　·　Y 观测队友';
+    $('brief-mode').textContent=$('mode').value==='pve'?'单人或同码合作　·　清除三波 AI 巡逻机　·　队友免伤':$('mode').value==='crown'?'持星每 8 秒得分　·　击毁持星者立即夺星':duel?'同房间码加入对战　·　7 点配装　·　X 热诱弹':'房间码留空单飞　·　同码编队　·　Y 观测队友';
     displayCard();
   }
   $('mode').addEventListener('change',fillHangar);
@@ -1935,8 +1940,9 @@ window.Cockpit = Cockpit;
       if($('mode').value!=='tour')field=null;
       let pos=departures[Number($('depart').value)].slice(), yaw=Math.PI;
       if(online) {
-        if(location.protocol==='file:') throw new Error('联机请打开房主终端显示的 HTTP 地址，而不是双击 HTML。');
-        const ticket=await room.join(channel,type,$('mode').value==='tour'?'tour':'pvp',name,$('mode').value==='crown'?'crown':'beacon'); if(!ticket) return;
+        if(location.protocol==='file:') throw new Error('请先运行 start-lan.cmd，再用浏览器打开终端显示的地址。单人 PvE 也可用本机地址开房。');
+        const mode=$('mode').value;
+        const ticket=await room.join(channel,type,mode==='crown'?'pvp':mode,name,mode==='pve'?'waves':mode==='crown'?'crown':'beacon'); if(!ticket) return;
         const lead=ticket.lead;
         slot=ticket.slot;
         const occupied=lead&&Airfields.at(lead.pos[0],lead.pos[2]);
@@ -1951,7 +1957,7 @@ window.Cockpit = Cockpit;
         pos[0]+=Math.cos(yaw)*side*38-Math.sin(yaw)*Math.abs(side)*22;
         pos[2]+=Math.sin(yaw)*side*38+Math.cos(yaw)*Math.abs(side)*22;
         pos[1]=Math.max(pos[1],groundAt(pos[0],pos[2])+40);
-        if(ticket.mode==='pvp'){pos=ticket.spawn;yaw=ticket.heading;}
+        if(room.combat){pos=ticket.spawn;yaw=ticket.heading;}
       } else room.leave();
       resetFlight(type,pos,yaw);visitedFields.clear();loadSurvey();
       if(field){
@@ -1961,7 +1967,7 @@ window.Cockpit = Cockpit;
       }
       S.view=S.prev=1; S.viewT=1; notice=''; keys.clear(); flying=true;audio.setActive(!document.hidden);
       $('hangar').hidden=true; $('strip').hidden=false; $('title').classList.add('gone'); document.activeElement?.blur();
-      Object.assign(trial,{next:0,time:0,best:new Map(),course:Lake.courses[0]});followBeacon=room.mode==='pvp';chart.selected=followBeacon?2:Number($('depart').value);
+      Object.assign(trial,{next:0,time:0,best:new Map(),course:Lake.courses[0]});followBeacon=room.combat;chart.selected=followBeacon?2:Number($('depart').value);
       duelLife=0; onlineSortie=online;$('scope').hidden=!onlineSortie;updateHints();last=performance.now();
     } catch(error) {
       audio.setActive(false);
@@ -1974,7 +1980,7 @@ window.Cockpit = Cockpit;
     // Enter and Space retain normal activation for a focused panel button.
     if(event.target instanceof HTMLButtonElement && (event.code==='Enter'||event.code==='Space'))return;
     event.preventDefault(); if(event.repeat)return;
-    if(event.code==='KeyL' && room.mode==='pvp'){
+    if(event.code==='KeyL' && room.combat){
       if(outfit.element.hidden){$('lake-chart').hidden=true;outfit.open(room.pendingKit??room.kit);keys.delete('KeyJ');room.triggerTap=false;}
       else outfit.close();return;
     }
@@ -1987,7 +1993,7 @@ window.Cockpit = Cockpit;
     }
     if(event.code==='KeyO'&&!$('lake-chart').hidden){toggleRange();return;}
     if(event.code==='KeyN'){$('lake-chart').hidden=!$('lake-chart').hidden;nextReadout=0;return;}
-    if(event.code==='KeyB'&&room.mode==='pvp'){navUntil=performance.now()+6000;followBeacon=true;nextReadout=0;return;}
+    if(event.code==='KeyB'&&room.combat){navUntil=performance.now()+6000;followBeacon=true;nextReadout=0;return;}
     if(event.code==='KeyK'){selectNextSite();return;}
     if(event.code==='Escape'){$('lake-chart').hidden=true;return;}
     keys.add(event.code);
@@ -2014,11 +2020,11 @@ window.Cockpit = Cockpit;
         try{localStorage.setItem('dusk-detail',String(quality));}catch{}
       }else displayPerf=!displayPerf;
     }
-    if(room.mode==='pvp'){
+    if(room.combat){
       if(slot>=0 && Outfit.has(room.kit,Outfit.items[slot].id))room.weapon=Outfit.items[slot].id;
       if(event.code==='KeyX')room.dodge=true;
       if(event.code==='KeyJ')room.triggerTap=true;
-      if(event.code==='KeyT'){const live=[...room.peers.values()].filter(peer=>peer.hp);room.target=live[(live.findIndex(peer=>peer.id===room.target)+1)%live.length]?.id??null;}
+      if(event.code==='KeyT'){const live=[...room.peers.values()].filter(peer=>peer.hp&&room.hostile(peer));room.target=live[(live.findIndex(peer=>peer.id===room.target)+1)%live.length]?.id??null;}
     }
     if(event.code==='KeyH') park();
   });
@@ -2046,7 +2052,7 @@ window.Cockpit = Cockpit;
   let nextReadout=0;
   function showReadout(now) {
     if(now<nextReadout) return; nextReadout=now+150;
-    if(room.mode!=='pvp'&&!body.grounded)surveyPass(now);
+    if(!room.combat&&!body.grounded)surveyPass(now);
     if(watchId && (!room.peers.has(watchId)||room.peers.get(watchId).hp===0))watchId=null;
     $('callsign').textContent=(room.name||soloName)+'　'+Flight.fleet[body.type].name+'  /  '+room.status;
     damageReadout(now);
@@ -2056,28 +2062,32 @@ window.Cockpit = Cockpit;
     const gearInfo=body.grounded?'地面 · '+(keys.has('KeyZ')?'刹车':S.speed<2?'R 加油门':'抬轮参考 '+Math.round(body.rotateSpeed*3.6)+' km/h · S 抬头'):
       runway&&body.pos[1]-runway.y<90?'跑道上方 '+Math.round(body.pos[1]-runway.y)+' m · 垂速 '+S.vs.toFixed(1)+' m/s':body.updraft>.2?'上升气流 +'+body.updraft.toFixed(1)+' m/s':S.g.toFixed(1)+' G';
     $('telemetry').textContent=Math.round(S.speed*3.6)+' km/h　M '+body.mach.toFixed(2)+'　'+Math.round(S.pos[1])+' m　'+Math.round(body.throttle*100)+'% 油门　'+gearLabel+'　'+gearInfo;
-    const peers=room.mode==='pvp'?[]:[...room.peers.values()].map(peer=> {
+    const peers=room.combat?[]:[...room.peers.values()].map(peer=> {
       const delta=sub(nearest(peer.pos,S.pos),S.pos), bearing=(Math.atan2(delta[0],-delta[2])*180/Math.PI+360)%360;
       return peer.name+' '+Math.round(Math.hypot(...delta))+' m / '+Math.round(bearing)+'°';
     });
-    if(room.mode!=='pvp')$('wingmen').textContent=(S.stalled?'迎角过大 · 失速　':'')+(now<noticeUntil?notice:peers.join('　')||(room.token?'等待僚机加入':'湖区自由飞行'));
+    if(!room.combat)$('wingmen').textContent=(S.stalled?'迎角过大 · 失速　':'')+(now<noticeUntil?notice:peers.join('　')||(room.token?'等待僚机加入':'湖区自由飞行'));
     const self=room.self;
-    if(self&&followBeacon&&!self.star)chart.selected=self.beacon.site;
+    if(room.mode==='pvp'&&self&&followBeacon&&!self.star)chart.selected=self.beacon.site;
     const site=Lake.sites[chart.selected];
-    const target=room.mode!=='pvp'&&trial.next&&chart.selected===trial.course.site?trial.course.gates[trial.next]:null;
+    const target=!room.combat&&trial.next&&chart.selected===trial.course.site?trial.course.gates[trial.next]:null;
     const star=self?.star,carrier=star?.id===room.id?body:room.peers.get(star?.id);
     const followingStar=followBeacon&&carrier;
-    const targetPos=followingStar?carrier.pos:target?[target.x,target.y,target.z]:site.pos;
+    const patrolTarget=room.mode==='pve'&&followBeacon&&room.peers.get(room.target);
+    const targetPos=patrolTarget?patrolTarget.pos:followingStar?carrier.pos:target?[target.x,target.y,target.z]:site.pos;
     const dx=targetPos[0]-body.pos[0],dz=targetPos[2]-body.pos[2];
     const bearing=(Math.atan2(dx,-dz)*180/Math.PI+360)%360;
-    $('waypoint').hidden=room.mode==='pvp' && $('lake-chart').hidden && now>=navUntil;
+    $('waypoint').hidden=room.combat && $('lake-chart').hidden && now>=navUntil;
     $('trait-state').hidden=!watchId && S.view!==3 && body.deploy<.05 && $('lake-chart').hidden && !displayPerf;
-    $('waypoint').textContent=(followingStar?'持星 · '+(carrier.name||room.name):target?trial.course.name+' · 第 '+trial.next+' 环':site.name)+'　'+Math.round(Math.hypot(dx,dz))+' m　方位 '+Math.round(bearing)+'°（航向 '+Math.round((S.yaw*180/Math.PI+360)%360)+'°）　航点高度 '+Math.round(targetPos[1])+' m';
-    if(!$('lake-chart').hidden){chart.draw(body,room);$('map-note').textContent=site.name+'　'+site.note+(Lake.frontier.includes(site)?'　外环通场 '+chart.survey.size+'/'+Lake.frontier.length:'');
-      $('map-score').textContent=self?[{...self,id:room.id},...room.peers.values()].sort((a,b)=>b.beacons-a.beacons||b.kills-a.kills)
-        .map((pilot,i)=>(i+1)+'. '+pilot.name+(pilot.id===room.id?'（我）':'')+'　'+pilot.beacons+(star?' 星分 / ':' 信标 / ')+pilot.kills+' 击毁 / '+pilot.assists+' 助攻').join('\n'):'';
+    $('waypoint').textContent=(patrolTarget?patrolTarget.name:followingStar?'持星 · '+(carrier.name||room.name):target?trial.course.name+' · 第 '+trial.next+' 环':site.name)+'　'+Math.round(Math.hypot(dx,dz))+' m　方位 '+Math.round(bearing)+'°（航向 '+Math.round((S.yaw*180/Math.PI+360)%360)+'°）　航点高度 '+Math.round(targetPos[1])+' m';
+    if(!$('lake-chart').hidden){chart.draw(body,room,patrolTarget?.pos);$('map-note').textContent=patrolTarget?'巡逻目标 · '+patrolTarget.name:site.name+'　'+site.note+(Lake.frontier.includes(site)?'　外环通场 '+chart.survey.size+'/'+Lake.frontier.length:'');
+      $('map-score').textContent=self?[{...self,id:room.id},...room.peers.values()].filter(p=>room.mode!=='pve'||!room.hostile(p)).sort((a,b)=>b.beacons-a.beacons||b.kills-a.kills)
+        .map((pilot,i)=>(i+1)+'. '+pilot.name+(pilot.id===room.id?'（我）':'')+'　'+(room.mode==='pve'?'':pilot.beacons+(star?' 星分 / ':' 信标 / '))+pilot.kills+' 击毁 / '+pilot.assists+' 助攻').join('\n'):'';
     }
-    if(room.mode==='pvp'&&self){
+    if(room.mode==='pve'){
+      const m=room.mission;
+      $('activity').textContent=!m||!m.wave?'巡逻机正在入场':m.countdown?(m.wave===3?'三波全清 · 巡逻完成！　新一轮 ':'本波已清空　下一波 ')+m.countdown+' s':'湖区巡逻　波次 '+m.wave+'/3　剩余 '+m.remaining+'/'+m.total+' 架 AI';
+    }else if(room.combat&&self){
       const beacon=self.beacon;
       $('activity').textContent=!room.peers.size?'单人自由飞行　·　房间码 '+room.code:star?(carrier?'持星 '+(carrier.name||room.name)+'　'+star.seconds+'/8 秒':'等待持星者')+'　星分 '+self.beacons:'争夺 '+Lake.sites[beacon.site].name+' · '+beacon.left+'s　'+(beacon.count>1?'争夺中':beacon.hold?'占领 '+beacon.hold.toFixed(1)+'/4s':beacon.count?'有人占领':'空闲')+'　信标分 '+self.beacons;
     }else{
@@ -2085,7 +2095,7 @@ window.Cockpit = Cockpit;
       $('activity').textContent=(Airfields.at(body.pos[0],body.pos[2])||visitedFields.size?'转场收集 '+visitedFields.size+'/3　':'')+(trial.next?trial.course.name+'计时 '+trial.time.toFixed(1)+'s · 下一环 '+trial.next+'/2':trial.best.has(chart.selected)?site.name+'最佳 '+trial.best.get(chart.selected).toFixed(2)+'s':chart.selected>=9?site.note:'向南穿桥开始计时')+
         (harbor?'　灯港 '+harbor.count+' 架 · '+harbor.seconds+'/5s · 集结 '+harbor.rallies+' 次':'');
     }
-    if(room.mode==='pvp' && self){
+    if(room.combat && self){
       $('wingmen').textContent='战绩 '+self.kills+' / '+self.deaths+'　助攻 '+self.assists+'　HP '+self.hp+'　目标 '+(room.peers.get(room.target)?.name??'无');
       const tracked=room.peers.get(room.target);
       const distance=tracked?Math.hypot(...tracked.pos.map((v,i)=>v-S.pos[i])):Infinity;
@@ -2151,7 +2161,7 @@ window.Cockpit = Cockpit;
     update(dt); render();
     if(flying) {
       frameMs+=.06*(clamp(raw*1000,1,250)-frameMs);
-      if(keys.has('KeyX')&&room.mode==='pvp')room.dodge=true;
+      if(keys.has('KeyX')&&room.combat)room.dodge=true;
       room.sync(body,now,readControls(),keys.has('KeyJ'));showReadout(now);audio.update(body,S,cam,room,keys.has('KeyZ'),keys.has('KeyJ')&&room.weapon==='gun');
       if(room.token)scope.draw(now,room,body,cam);
       else if(onlineSortie){park();$('launch-note').textContent='房间连接已过期，请重新加入。';}
