@@ -14,10 +14,11 @@ const Outfit = (() => {
   const keys=['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit8','Digit9','Minus'];
   const keyLabel=i=>keys[i]==='Minus'?'−':keys[i].slice(5);
   const bits=new Map(items.map((item,i)=>[item.id,1<<i]));
+  function maskOf(...ids){return ids.reduce((mask,id)=>mask|bits.get(id),0);}
   function has(mask,id){return !!(mask&bits.get(id));}
   function cost(mask){return items.reduce((sum,item,i)=>sum+((mask&(1<<i))?item.cost:0),0);}
   function valid(mask){return Number.isInteger(mask)&&mask>0&&mask<(1<<items.length)&&cost(mask)<=budget;}
   function first(mask){return items.find((item,i)=>mask&(1<<i)).id;}
-  return {items,keys,keyLabel,budget,has,cost,valid,first,standard:3};
+  return {items,keys,keyLabel,budget,has,cost,valid,first,maskOf,standard:3};
 })();
 if(typeof module!=='undefined')module.exports=Outfit;

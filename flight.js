@@ -30,20 +30,24 @@ const Flight = (() => {
   fleet.nocturne={...fleet.delta,name:'夜枭 N-6',role:'六代无尾概念机',mass:7200,area:47,cruise:204,thrust:51000,roll:3.2,pitch:2.05,inertia:[10200,21800,17200],elevon:true};
   fleet.ember={...fleet.petrel,name:'火燕 U-1',role:'纵向静不稳定验证机',mass:3500,area:29,cruise:164,thrust:33000,roll:4.6,pitch:2.8,inertia:[3500,8600,6400],unstable:1.4,elevon:true};
   fleet.tandem={...fleet.tern,name:'蜻蜓 T-4',role:'串列翼巡游',mass:2150,area:36,cruise:83,thrust:8700,roll:2.7,pitch:1.85,inertia:[2900,6500,4900]};
+  fleet.cirrus={...fleet.nocturne,name:'暮隼 G-6',role:'宽翼六代概念机',mass:6950,area:51,cruise:196,roll:2.9,inertia:[10400,22400,18600],wingLevel:true};
+  fleet.ibis={...fleet.petrel,name:'朱鹮 F-8',role:'前掠翼表演机',mass:2850,area:24,cruise:149,roll:4.7,pitch:2.65,inertia:[2450,6200,4800],rollCoupling:true,elevon:true};
   fleet.delta.elevon=true;
   // Hinge height and station in mesh units, followed by differential and lift-mode travel.
   for(const [type,y,z,mix,lift] of [
     ['kite',.24,4.62,.13,0],['pulse',.24,4.62,0,0],['petrel',.24,4.62,.19,0],['aurora',.24,4.62,.12,0],
-    ['lance',.4,5.42,0,0],['wisp',.52,4.2,0,.32],['ember',.42,4.7,.23,0],['tandem',.85,3.6,0,.22]
+    ['lance',.4,5.42,0,0],['wisp',.52,4.2,0,.32],['ember',.42,4.7,.23,0],['tandem',.85,3.6,0,.22],['ibis',.40,4.85,.16,0]
   ])fleet[type].canard={y,z,mix,lift};
   function canardAngle(spec,pitch,roll,deploy,side){
     const c=spec.canard;
     return clamp(-.48*pitch-c.mix*roll*side-c.lift*deploy,-.67,.67);
   }
-  const highPower={nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
+  const highPower={cirrus:108000,ibis:73000,nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
     needle:16000,delta:90000,petrel:65000,aurora:99000,spire:80000,skate:74000,wisp:70000,opal:70000,lance:81000};
   for(const [type,boost] of Object.entries(highPower))fleet[type].highPower=boost;
   const cards={
+    cirrus:['巡航翼平','宽大的折线翼接上低矮双尾。按住 V 并松开滚转键，飞机会自己放平两翼。',[10.8,.38,-6.3],[.48,.60,.70]],
+    ibis:['联动滚转','朱红翼尖向机鼻回折。按住 V 并用 Q/E 偏航，飞机随之滚转，W/S 会带动前方鸭翼。',[7.8,.62,3.5],[.88,.43,.43]],
     nocturne:['分裂减速舵','无尾折线翼以升降副翼俯仰、滚转。按住 V 张开双侧翼梢减速舵，配合 Q/E 差动转向。',[9.2,.18,-5.3],[.42,.47,.62]],
     ember:['纵向静不稳定','默认电传以鸭翼修正迎角扰动。按住 V 逐步放宽增稳，松开 V 恢复辅助；用 W/S 感受同一架飞机的差别。',[6.8,.34,-3.8],[.92,.39,.27]],
     tandem:['串列增升翼','前后两对翼面前后错开。W/S 调整前翼迎角，V 增大前翼安装角，适合低速穿门。',[8.1,.2,-4.5],[.46,.78,.64]],
@@ -198,14 +202,14 @@ const Flight = (() => {
     controls[0]+=(clamp(command.pitch+body.pitchTrim+feedback,-1,1)-controls[0])*gain;controls[1]+=(-command.yaw-controls[1])*gain;controls[2]+=(-command.roll-controls[2])*gain;
     rates[0]+=dt*(authority*(controls[0]*spec.pitch*effective+(spec.unstable||-2.9)*sinAlpha)+body.vector*body.engine*(.15+.85*c.engine/100)*(body.type==='aurora'?4.6:7)-1.9*damping*oldPitch-oldYaw*oldRoll*(inertia[2]-inertia[1])/inertia[0]);
     rates[1]+=dt*(authority*(controls[1]*(body.type==='gull'?.77+.89*body.deploy:body.type==='nocturne'?.77+.64*body.deploy:.77)*effective-1.9*slipSin)-1.75*damping*(body.type==='spire'?1+body.deploy:1)*oldYaw-oldRoll*oldPitch*(inertia[0]-inertia[2])/inertia[1]);
-    rates[2]+=dt*(authority*(controls[2]*spec.roll*(body.type==='swift'?1+.42*body.deploy:1)*effective+.5*slipSin+.008*(c.leftWing-c.rightWing)+(body.type==='petrel'?1.8*controls[1]*body.deploy:0))-1.65*damping*oldRoll-oldPitch*oldYaw*(inertia[1]-inertia[0])/inertia[2]);
+    rates[2]+=dt*(authority*(controls[2]*spec.roll*(body.type==='swift'?1+.42*body.deploy:1)*effective+.5*slipSin+.008*(c.leftWing-c.rightWing)+(body.type==='petrel'||spec.rollCoupling?1.8*controls[1]*body.deploy:0))-1.65*damping*oldRoll-oldPitch*oldYaw*(inertia[1]-inertia[0])/inertia[2]);
     if(spec.vector===3){
       const power=dt*body.engine*(.15+.85*c.engine/100);
       rates[1]-=power*body.vecYaw*(21000/inertia[1]);
       rates[2]-=power*body.vecRoll*(15500/inertia[2]);
     }
     if(body.type==='loom')rates[0]-=dt*body.deploy*1.8*oldPitch;
-    if(body.type==='rook' && !command.roll)rates[2]-=dt*body.deploy*(axis.r[1]*2.2+rates[2]*.9);
+    if((body.type==='rook'||spec.wingLevel) && !command.roll)rates[2]-=dt*body.deploy*(axis.r[1]*2.2+rates[2]*.9);
     const [xx,yy,zz,ww] = body.quat, [pitch,yaw,roll] = body.rates;
     const half=.5*dt,quat=body.quat;
     quat[0]+=half*(ww*pitch+yy*roll-zz*yaw);quat[1]+=half*(ww*yaw+zz*pitch-xx*roll);

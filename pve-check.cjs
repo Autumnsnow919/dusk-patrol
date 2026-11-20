@@ -74,5 +74,31 @@ async function exerciseRooms() {
     assert.equal((await join(leader.room,'tour')).status,200);
   } finally {await new Promise(resolve=>server.close(resolve));}
 }
+function exercisePatrolResponse(){
+  const arena=new Arena(0,'waves'),left=arena.add('left','tern'),right=arena.add('right','tern');
+  left.body=Flight.create('tern',[-2800,1500,1600],0);
+  right.body=Flight.create('tern',[4600,1500,1600],0);
+  left.shield=right.shield=0;
+  const advance=seconds=>{for(let i=0;i<Math.round(seconds/Flight.tick);i++)arena.tick(Flight.tick);};
+  advance(3);
+  const [first,second]=arena.mission.drones;
+  assert(first.center[0]<690 && second.center[0]>1110,'each lane travels toward its player');
+  arena.damage(left,first,8);
+  advance(.45);
+  assert(!arena.events.some(e=>e.from===first.id&&e.kind==='prism'));
+  advance(.6);
+  assert(arena.events.some(e=>e.from===first.id&&e.kind==='prism'));
+  const hp=first.hp;
+  arena.damage(left,first,8);assert.equal(first.hp,hp);
+  left.body=Flight.create('tern',[900,1600,1500],0);
+  right.body=Flight.create('tern',[915,1600,800],0);
+  first.body=Flight.create(first.type,[900,1600,700],0);
+  arena.input(left,{controls:{pitch:0,roll:0,yaw:0,throttle:0},weapon:'missile',target:right.id});
+  arena.tick(Flight.tick);
+  const marks=new Map(arena.snapshot(left,0).tracking.marks);
+  assert(marks.has(first.id) && !marks.has(right.id));
+  assert.equal(arena.snapshot(right,0).self.warned,false);
+}
 exerciseWaves();
+exercisePatrolResponse();
 exerciseRooms().then(()=>console.log('PASS PvE waves, AI flight and attacks, friendly fire, solo and eight-seat co-op'));

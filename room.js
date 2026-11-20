@@ -2,7 +2,22 @@ class FlightRoom {
   get combat() { return this.mode==='pvp'||this.mode==='pve'; }
   hostile(peer) { return this.mode==='pvp'||(this.mode==='pve'&&peer.id.startsWith('ai-')); }
   constructor() {
-    this.peers=new Map();this.shots=new Map();this.tracers=new Map();this.seenTracer=0; this.generation=0; this.status='单人飞行'; this.nextSync=0;
+    this.peers=new Map();this.marks=new Map();this.shots=new Map();this.tracers=new Map();this.seenTracer=0; this.generation=0; this.status='单人飞行'; this.nextSync=0;
+  }
+  cycleTarget() {
+    const peers=[...this.peers.values()].filter(p=>p.hp&&this.hostile(p));
+    const spec=Sight.profiles[this.weapon];
+    let choices=peers;
+    if(spec && this.self){
+      const body={pos:this.self.pos,basis:Flight.axes(this.self.quat)};
+      const inside=peers.filter(p=>this.marks.has(p.id)||Sight.inRing(body,p.pos,spec.ring,spec.reach,spec.inner));
+      if(inside.length)choices=inside;
+    }
+    const index=choices.findIndex(p=>p.id===this.target);
+    this.target=choices.length?choices[(index+1)%choices.length].id:null;
+  }
+  selectWeapon(weapon) {
+    if(this.weapon!==weapon){this.weapon=weapon;this.marks.clear();this.triggerTap=false;}
   }
   async request(path, data, token) {
     const response=await fetch('/'+path,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(data),signal:AbortSignal.timeout(3000)});
@@ -10,6 +25,7 @@ class FlightRoom {
     return response.json();
   }
   leave() {
+    this.marks.clear();
     if(this.token) this.request('leave',{},this.token).catch(()=>{});
     this.triggerTap=false;this.tracerTime=-Infinity;this.token=null; this.generation++; this.busy=false; this.peers.clear(); this.shots.clear();this.tracers=new Map();this.seenTracer=0;this.name=''; this.status='单人飞行';
     this.harbor=null; this.mission=null; this.kit=Outfit.standard; this.pendingKit=null;
@@ -19,7 +35,7 @@ class FlightRoom {
     this.leave();
     const version=this.generation;
     const reply=await this.request('join',{room,type,mode,name,rule});
-    if(reply.mode!==mode||reply.protocol!==10||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw new Error('旧版房主');}
+    if(reply.mode!==mode||reply.protocol!==11||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw new Error('旧版房主');}
     if(version!==this.generation) { this.request('leave',{},reply.token).catch(()=>{}); return null; }
     this.token=reply.token; this.id=reply.id;this.name=reply.name;this.mode=mode;this.rule=rule;this.code=reply.room??room; this.status=this.code+' · 1/8'; this.nextSync=0; return reply;
   }
@@ -32,7 +48,7 @@ class FlightRoom {
       const command=duel?{controls,compactSelf:true,weapon:this.weapon,target:this.target,fire:fire||this.triggerTap,tap:this.triggerTap,dodge:this.dodge,after:this.after,seenTracer:this.seenTracer,known:[...this.peers.keys()]}:{pos:body.pos,quat:body.quat,vel:body.vel,condition:body.damaged?body.condition:undefined,rig:Flight.rig(body).map(v=>Math.round(v*100)/100)};
       if(duel && this.pendingKit!==null)command.kit=this.pendingKit;
       this.triggerTap=false;this.dodge=false;
-      const {peers,self:wireSelf,events,serial,harbor,shots,tracers,clock,tracerSeq,live,mission}=await this.request('sync',command,this.token);
+      const {peers,self:wireSelf,events,serial,harbor,shots,tracers,clock,tracerSeq,live,mission,tracking}=await this.request('sync',command,this.token);
       if(version!==this.generation) return;
       const keep=new Set();
       for(let i=0;i<peers.length;i++){
@@ -57,7 +73,14 @@ class FlightRoom {
         this.seenTracer=tracerSeq;this.tracerClock=clock;this.tracerTime=performance.now();
         this.kit=self.kit;
         if(this.pendingKit===self.kit)this.pendingKit=null;
-        if(!Outfit.has(self.kit,this.weapon))this.weapon=self.weapon;
+        if(!Outfit.has(self.kit,this.weapon))this.selectWeapon(self.weapon);
+        if(this.weapon===command.weapon){
+          this.marks.clear();
+          if(tracking && self.weapon===this.weapon){
+            for(const [id,percent] of tracking.marks)if(this.peers.get(id)?.hp)this.marks.set(id,percent);
+            if(this.target===command.target && this.marks.has(tracking.focus))this.target=tracking.focus;
+          }
+        }
         this.self=self;this.after=serial;
         const stamp=performance.now(),ids=new Set();
         for(const [id,x,y,z,diverted,fx,fy,fz,type] of shots){
@@ -76,7 +99,7 @@ class FlightRoom {
       this.status=this.code+' · '+(others+1)+'/8';
     } catch(error) {
       if(version!==this.generation) return;
-      this.peers.clear();this.shots.clear();this.tracers=new Map();this.seenTracer=0; this.tracerTime=-Infinity;this.nextSync=performance.now()+900;
+      this.marks.clear();this.peers.clear();this.shots.clear();this.tracers=new Map();this.seenTracer=0; this.tracerTime=-Infinity;this.nextSync=performance.now()+900;
       if(error.status===401) {this.leave(); this.status='房间已超时 · H 重新加入';}
       else this.status='连接中断 · 正在重试';
     } finally {if(version===this.generation) this.busy=false;}

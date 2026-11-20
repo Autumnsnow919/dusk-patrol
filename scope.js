@@ -1,8 +1,10 @@
+const scopeRing=Array.from({length:24},(_,i)=>[Math.cos(i*Math.PI/12),Math.sin(i*Math.PI/12)]);
 class DuelScope {
   constructor(canvas){this.canvas=canvas;this.ctx=canvas.getContext('2d');this.next=0;this.peerAxes={r:[0,0,0],u:[0,0,0],f:[0,0,0]};}
   draw(now,room,body,cam){
     if(now<this.next)return;
-    this.next=now+1000/90;
+    const interval=1000/60;
+    this.next=now+interval-(now-this.next)%interval;
     const c=this.canvas,g=this.ctx,w=Math.min(960,innerWidth),h=Math.round(innerHeight*w/innerWidth);
     if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
     g.clearRect(0,0,w,h);g.font='500 12px "IBM Plex Mono", monospace';g.lineWidth=1;
@@ -26,47 +28,58 @@ class DuelScope {
     }
     const duel=room.combat,self=room.self,basis=Flight.axes(body.quat),target=room.peers.get(room.target);
     const rx=w-60,ry=90,R=40;
-    g.fillStyle='#18212df0';g.fillRect(rx-R-7,ry-R-7,2*R+14,2*R+23);
+    const showTarget=duel && target?.hp;
+    const pos=showTarget?target.displayPos:null;
+    const targetRange=pos?Math.hypot(pos[0]-body.pos[0],pos[1]-body.pos[1],pos[2]-body.pos[2]):Infinity;
+    g.fillStyle='#18212df0';g.fillRect(rx-R-7,ry-R-7,2*R+14,2*R+(showTarget?39:23));
     g.strokeStyle='#537c79';circle([rx,ry],R);circle([rx,ry],R/2);
     path([[rx-R,ry],[rx+R,ry]]);path([[rx,ry-R],[rx,ry+R]]);
     g.fillStyle=teal;g.fillText('N',rx+3,ry-R+9);g.fillText(room.weapon==='ribbon'?'3.6 km':'1.8 km',rx-R,ry+R+12);
+    if(showTarget){
+      const level=pos[1]-body.pos[1];
+      g.fillStyle=gold;g.fillText((level>50?'↑ ':level< -50?'↓ ':'')+(targetRange<1000?Math.round(targetRange)+' m':(targetRange/1000).toFixed(1)+' km'),rx-R,ry+R+27);
+    }
     g.strokeStyle=cream;path([[rx,ry],[rx+basis.f[0]*9,ry+basis.f[2]*9]]);g.fillRect(rx-1,ry-1,3,3);
     const labelRows=[];
     for(const peer of room.peers.values()){
       if(peer.hp===0)continue;
-      const p=peer.displayPos,dx=p[0]-body.pos[0],dz=p[2]-body.pos[2],scale=R/Math.max(room.weapon==='ribbon'?3600:1800,Math.hypot(dx,dz)*1.04);
+      const p=peer.displayPos,dx=p[0]-body.pos[0],dz=p[2]-body.pos[2],horizontal=Math.hypot(dx,dz),range=room.weapon==='ribbon'?3600:1800,scale=R/Math.max(range,horizontal*1.04);
       const x=Math.round(rx+dx*scale),y=Math.round(ry+dz*scale),selected=duel&&peer.id===room.target;
-      const col=selected?gold:room.mode==='pve'&&room.hostile(peer)?red:teal;
+      const charge=room.marks.get(peer.id),col=selected?gold:room.hostile(peer)?red:teal;
       g.strokeStyle=g.fillStyle=col;
       const head=Flight.axes(peer.displayQuat,this.peerAxes).f;
-      path([[x,y],[x+head[0]*6,y+head[2]*6]]);g.fillRect(x-1,y-1,3,3);
+      path([[x,y],[x+head[0]*6,y+head[2]*6]]);
+      if(horizontal>range)circle([x,y],2);else g.fillRect(x-1,y-1,3,3);
+      if(charge!==undefined){g.strokeStyle=charge===100?gold:cream;circle([x,y],6);}
       if(self?.star?.id===peer.id){g.fillStyle=gold;g.fillText('★',x-4,y-5);}
       if(selected)g.strokeRect(x-4,y-4,8,8);
       const screen=project(p);if(!screen)continue;
       const [px,py]=screen;if(px<0||py<0||px>w||py>h)continue;
       let ly=Math.max(15,py-12);
       for(const row of labelRows)if(Math.abs(row[0]-px)<95&&Math.abs(row[1]-ly)<14)ly=row[1]+15;
-      labelRows.push([px,ly]);label((self?.star?.id===peer.id?'★ ':'')+peer.name+(selected?' · '+Math.round(Math.hypot(dx,p[1]-body.pos[1],dz))+' m':''),px+9,ly,col);
+      const altitude=p[1]-body.pos[1],level=Math.abs(altitude)<50?'':altitude>0?' ↑':' ↓';
+      const track=charge===undefined?'':charge===100?' LOCK':' '+charge+'%';
+      labelRows.push([px,ly]);label((self?.star?.id===peer.id?'★ ':'')+peer.name+level+track+(selected?' · '+Math.round(Math.hypot(dx,altitude,dz))+' m':''),px+9,ly,col);
       if(selected){g.strokeStyle=gold;path([[px-10,py-4],[px-10,py+4],[px-5,py+4]]);path([[px+10,py+4],[px+10,py-4],[px+5,py-4]]);}
     }
     if(!duel||!self)return;
-    const missile=Sight.profiles[room.weapon];
-    const dist=target?Math.max(75,Math.min(missile?.reach||Sight.reach,Math.hypot(...target.displayPos.map((v,i)=>v-body.pos[i])))):650;
+    const reticle=room.weapon==='laser'?Sight.laser:Sight.profiles[room.weapon];
+    const dist=target?Math.max(75,Math.min(reticle?.reach||Sight.reach,targetRange)):650;
     const axisPoint=body.pos.map((v,i)=>v+basis.f[i]*dist),aim=project(axisPoint);
     g.strokeStyle=cream;
     if(aim){path([[aim[0]-4,aim[1]],[aim[0]+4,aim[1]]]);path([[aim[0],aim[1]-4],[aim[0],aim[1]+4]]);}
-    if(missile){
+    if(reticle){
       const dots=[];
-      for(let i=0;i<24;i++){
-        const t=Math.PI*i/12;
-        dots.push(project(axisPoint.map((v,d)=>v+missile.ring*dist*(Math.cos(t)*basis.r[d]+Math.sin(t)*basis.u[d]))));
+      for(const [co,si] of scopeRing){
+        dots.push(project(axisPoint.map((v,d)=>v+reticle.ring*dist*(co*basis.r[d]+si*basis.u[d]))));
       }
       g.lineWidth=3;g.strokeStyle='#292335';path(dots,true);
-      g.lineWidth=1;g.strokeStyle=self.acquire===100?gold:self.acquire?teal:cream;path(dots,true);
+      const charge=room.weapon==='laser'?Math.floor(100*self.lock):room.marks.get(room.target)||0;
+      g.lineWidth=1;g.strokeStyle=charge===100?gold:charge?teal:cream;path(dots,true);
       const bottom=dots[18];
-      if(self.acquire && bottom)label(self.acquire===100?'LOCK':self.acquire+'%',bottom[0]-15,bottom[1]+16,g.strokeStyle);
+      if(charge && bottom)label(charge===100?'LOCK':charge+'%',bottom[0]-15,bottom[1]+16,g.strokeStyle);
     }
-    if(room.weapon==='gun' && target?.hp && target.vel && dist<=620){
+    if(room.weapon==='gun' && target?.hp && target.vel && targetRange<=620){
       const pip=project(Sight.badge(target.displayPos,target.vel,body)),p=project(target.displayPos);
       if(pip&&p){
         const [x,y]=pip;

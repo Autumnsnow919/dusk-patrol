@@ -2021,10 +2021,10 @@ window.Cockpit = Cockpit;
       }else displayPerf=!displayPerf;
     }
     if(room.combat){
-      if(slot>=0 && Outfit.has(room.kit,Outfit.items[slot].id))room.weapon=Outfit.items[slot].id;
+      if(slot>=0 && Outfit.has(room.kit,Outfit.items[slot].id))room.selectWeapon(Outfit.items[slot].id);
       if(event.code==='KeyX')room.dodge=true;
       if(event.code==='KeyJ')room.triggerTap=true;
-      if(event.code==='KeyT'){const live=[...room.peers.values()].filter(peer=>peer.hp&&room.hostile(peer));room.target=live[(live.findIndex(peer=>peer.id===room.target)+1)%live.length]?.id??null;}
+      if(event.code==='KeyT')room.cycleTarget();
     }
     if(event.code==='KeyH') park();
   });
@@ -2100,9 +2100,11 @@ window.Cockpit = Cockpit;
       const tracked=room.peers.get(room.target);
       const distance=tracked?Math.hypot(...tracked.pos.map((v,i)=>v-S.pos[i])):Infinity;
       const missile=Sight.profiles[room.weapon];
-      const missileReadout=self.acquire===100?'已锁定':self.acquire?'捕获 '+self.acquire+'%':!tracked?'待选目标':distance>(missile?.reach||0)?'射程外':distance<missile?.inner?'近距盲区':'对入瞄准圈';
+      const charge=room.marks.get(room.target)||0;
+      const laserHint=!tracked?'待选目标':distance>Sight.laser.reach?'射程外':self.lock?'照射 '+Math.floor(self.lock*100)+'%':'对入圆圈 · 按住 J';
+      const missileReadout=charge===100?'已锁定':charge?'捕获 '+charge+'%':!tracked?'待选目标':distance>(missile?.reach||0)?'射程外':distance<missile?.inner?'近距盲区':self.cool?'装填中':'对入瞄准圈';
       const warning=now<noticeUntil&&notice==='机炮拦截成功'?notice:self.revive?'击毁 · '+self.revive.toFixed(1)+' s 后重生':self.shield?'出生保护':self.incoming?'来袭 · X 热诱弹':self.warned?'锁定预警':self.prism?'镜阵展开':self.diverted?'诱偏成功':(!body.grounded && !runway && S.agl<45)||Math.hypot(S.pos[0]-900,S.pos[2]-1500)>Lake.arenaRadius-1200 || S.pos[1]>Lake.arenaCeiling-350?'接近赛场边界':'';
-      $('combat-state').textContent=warning+'　'+(Outfit.items.find(item=>item.id===room.weapon).name+(room.weapon==='laser'?' '+Math.round(self.lock*100)+'%':missile?' · '+missileReadout:room.weapon==='gun'&&distance<=620?' · ◇ 预瞄':''))+
+      $('combat-state').textContent=warning+'　'+(Outfit.items.find(item=>item.id===room.weapon).name+(room.weapon==='laser'?' · '+laserHint:missile?' · '+missileReadout+'　跟踪 '+room.marks.size+'/'+Sight.trackSlots:room.weapon==='gun'&&tracked&&distance<=620?' · ◇ 预瞄':''))+
         (room.weapon==='gun'?'　'+(self.hot?'过热锁止 · 冷却中 ':'炮温 ')+Math.round(self.heat*100)+'%':'')+
         (room.pendingKit!==null?' · 提交配装中':self.refit?' · 换装 '+self.refit.toFixed(1)+'s':self.hot&&room.weapon==='gun'?'':self.cool?' · 冷却 '+self.cool.toFixed(1)+'s':' · 就绪')+'　热诱弹 '+self.flares+'/12 · '+(self.puffs?'连放中':self.dodge?self.dodge.toFixed(1)+'s':self.flares?'就绪':'补充中');
     }else $('combat-state').textContent=(body.type==='kite'||body.type==='rv8a')?'迎角 '+Math.round(body.alpha*180/Math.PI)+'°　升降率 '+S.vs.toFixed(1)+' m/s　滚转 '+Math.round(-body.rates[2]*180/Math.PI)+'°/s':'';

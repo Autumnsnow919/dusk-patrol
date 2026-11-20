@@ -52,6 +52,76 @@ function movementPass(input){
 assert.equal(movementPass(idle),'hit');
 assert.equal(movementPass({...idle,pitch:1,roll:1,throttle:1,vector:true}),'fade');
 
+// A level crossing used to miss even with a full capture and no evasive input.
+for(const weapon of ['missile','ribbon']){
+  for(const heading of [0,Math.PI/2,Math.PI*.75]){
+    const pilot={id:'one',body:Flight.create('tern',[0,1200,0],0)};
+    const distance=weapon==='ribbon'?1800:500;
+    const target={id:'two',hp:100,life:1,body:Flight.create('opal',[0,1200,-distance],heading)};
+    const shot=Bolts.launch(1,pilot,target,weapon);
+    let outcome;
+    for(let i=0;i<1200&&!outcome;i++){
+      Flight.step(target.body,idle,Flight.tick);
+      outcome=Bolts.step(shot,target,Flight.tick);
+    }
+    assert.equal(outcome,'hit',weapon+' crossing at '+heading);
+  }
+}
+
+function checkTracks(weapon){
+  const game=new Arena(0),pilot=game.add('pilot','tern');
+  pilot.body=Flight.create('tern',[0,1400,0],0);
+  pilot.shield=0;pilot.kit=weapon==='missile'?3:65;
+  const peers=['a','b','c','d','outside'].map((id,i)=>{
+    const peer=game.add(id,'tern');peer.shield=0;
+    peer.body=Flight.create('tern',[i===4?450:20*(i-1),1400,-900],0);
+    return peer;
+  });
+  function advance(count,target,fire=false){
+    for(let i=0;i<count;i++){game.input(pilot,{controls:idle,weapon,target,fire});game.tick(Flight.tick);}
+  }
+  const snapshot=()=>game.snapshot(pilot,0).tracking;
+  advance(60,'outside',true);
+  const initial=snapshot();
+  assert.equal(initial.focus,'a');
+  assert.deepEqual(initial.marks.map(([id])=>id),['a','b','c']);
+  assert(initial.marks.every(([,pct])=>pct>0 && pct<100));
+  assert.deepEqual(peers.map(p=>game.snapshot(p,0).self.warned),[true,true,true,false,false]);
+  advance(200,'outside',true);
+  assert.equal(game.shots.length,0,'an input naming another contact must not spend a shot');
+  advance(1,'d');
+  assert.deepEqual(snapshot().marks,[['a',100],['b',100],['d',0]]);
+  game.input(pilot,{controls:idle,weapon,target:'b',fire:true});
+  assert.equal(snapshot().focus,'b','the sync that handles T must echo its new primary');
+  game.tick(Flight.tick);
+  assert.deepEqual(game.shots.map(s=>s.to),['b']);
+  assert.deepEqual(game.snapshot(pilot,0,0,[],true).tracking,snapshot());
+  assert.equal(new Map(snapshot().marks).get('a'),100);
+  assert(game.snapshot(peers[1],0).self.incoming);
+  game.reset(peers[0]);advance(1,'a');
+  assert(!new Map(snapshot().marks).has('a'));
+  game.input(pilot,{controls:idle,weapon:'gun'});
+  assert.equal(game.snapshot(pilot,0).tracking,undefined);
+}
+checkTracks('missile');
+checkTracks('ribbon');
+
+{
+  const game=new Arena(0),pilot=game.add('pilot','tern'),peer=game.add('peer','tern');
+  pilot.shield=peer.shield=0;pilot.kit=4;
+  pilot.body=Flight.create('tern',[900,1300,1600],0);
+  peer.body=Flight.create('tern',[900,1300,1000],0);
+  const beam=fire=>{game.input(pilot,{controls:idle,weapon:'laser',target:peer.id,fire});game.tick(Flight.tick);};
+  for(let i=0;i<65;i++)beam(true);
+  assert(game.snapshot(peer,0).self.warned && game.snapshot(pilot,0).self.lock>0);
+  beam(false);assert.equal(game.snapshot(pilot,0).self.lock,0);
+  peer.body.pos[0]+=220;
+  for(let i=0;i<280;i++)beam(true);
+  assert.equal(peer.hp,100);assert.equal(game.snapshot(pilot,0).self.lock,0);
+  peer.body.pos[0]-=220;
+  for(let i=0;i<280;i++)beam(true);
+  assert.equal(peer.hp,0);
+}
 
 // Identical straight passes. An offset still inside the old 32-unit bubble
 // misses the entire airframe. A crossing cannon round removes both objects.

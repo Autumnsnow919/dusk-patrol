@@ -16,7 +16,7 @@ for(const [id,spec] of Object.entries(Flight.fleet)){
   assert(crossover!==null && crossover<45 && steadyMin>1.01 && altitudeError<12,id+' level flight');
   rows.push({airframe:id,secondsToMach1:+crossover.toFixed(1),machAt90s:+body.mach.toFixed(2)});
 }
-assert.equal(rows.length,17);console.table(rows);
+assert.equal(rows.length,19);console.table(rows);
 assert.equal(terrain.WORLD.L,81920);
 const sample=terrain.makeHeightSampler();
 for(const site of Lake.sites.slice(9)){

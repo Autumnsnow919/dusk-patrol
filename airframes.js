@@ -102,6 +102,8 @@ function buildPlane(type = 'comet', cells = null) {
     const tip=[span,prop?(sail?1:2.4):2,sweep,.10,rise];
     if(prop){root[2]=.36;knee.splice(0,5,span*.68,sail?2.05:2.95,.38,.16,rise*.67);}
     if(type==='nocturne'){root.splice(0,5,.45,14,1.1,.36,.18);knee.splice(0,5,span*.52,7.6,-.85,.24,.27);}
+    if(type==='cirrus'){root.splice(0,5,.48,14.6,.72,.43,.13);knee.splice(0,5,5.35,9,-1.65,.23,.26);tip[1]=1.35;}
+    if(type==='ibis'){root.splice(0,5,.5,6.4,-3.3,.32,.12);knee.splice(0,5,3.55,4.1,-1.5,.21,.22);tip[1]=1.5;}
     if(type==='ember')root.splice(0,5,.45,10,-1.1,.32,.16);
     if(type==='opal')knee.splice(0,5,4.45,5.1,-.55,.24,.52);
     if(type==='heron')knee.splice(0,5,5.2,3.6,.72,.22,.38);
@@ -154,7 +156,7 @@ function buildPlane(type = 'comet', cells = null) {
   function foreplane(side){
     if(!spec.canard)return;
     const {y,z}=spec.canard;
-    const extent=type==='tandem'?7.45:type==='ember'||type==='wisp'?4.35:type==='kite'?3.8:2.95;
+    const extent=type==='tandem'?7.45:type==='ember'||type==='wisp'?4.35:type==='ibis'?3.6:type==='kite'?3.8:2.95;
     const outerZ=type==='tandem'?z-.3:z-.85,rootX=type==='tandem'?.49:.54;
     component='foreplane bearing';
     loft([foil(side*.30,1.4,z,.21,y-.055),foil(side*(rootX+.19),.8,z,.14,y)],[GREY]);
@@ -211,7 +213,9 @@ function buildPlane(type = 'comet', cells = null) {
       component='boom tailplane';hingedBand(foil(0,1.9,-9.25,.14,1.98),foil(side*4.24,1.9,-9.25,.14,1.98),6,side,PALE);
     }else{
       if(!spec.elevon && type!=='tandem')stabilator(side,1.46,.03,-7.22,3.35,-8.36);
-      if(['comet','pulse','aurora','skate','opal'].includes(type)){
+      if(type==='cirrus'){
+        fin(side,[cx,.32,-5.7,4.25,.21],[side*4.6,2.18,-7.92,1.62,.10]);
+      }else if(['comet','pulse','aurora','skate','opal'].includes(type)){
         const wide=type==='skate'||type==='opal';
         fin(side,[cx,.34,-6.1,3.8,.21],[side*(wide?3.95:2.32),wide?2.75:3.55,-7.6,1.85,.10]);
       }else if(type!=='nocturne'&&side===1)fin(1,[0,.38,-6.15,4.1,.20],[0,3.95,-7.58,1.85,.09]);

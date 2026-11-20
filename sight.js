@@ -16,6 +16,9 @@ const Sight=(()=>{
     const time=Math.min(streakLife,Math.hypot(...pos.map((v,i)=>v-body.pos[i]))/streakSpeed);
     return pos.map((v,i)=>v+(vel[i]-body.vel[i])*time+(i===1?9*time*time:0));
   }
-  return {profiles,ring,reach,fill,inRing,badge,gunRate,streakSpeed,streakLife};
+  const trackSlots=3;
+  const laser={ring:.16,reach:950,fill:2.2};
+  const percent=(value,total)=>Math.min(100,Math.floor(100*value/total));
+  return {profiles,laser,ring,reach,fill,inRing,badge,gunRate,streakSpeed,streakLife,trackSlots,percent};
 })();
 if(typeof module!=='undefined')module.exports=Sight;

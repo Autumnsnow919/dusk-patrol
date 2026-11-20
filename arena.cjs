@@ -14,7 +14,7 @@ const weapons = {
   pulse: {range:290,wait:3.6,damage:23},
   gun: { range: 620, wait: 1/Sight.gunRate, damage: 2 },
   missile:Sight.profiles.missile,ribbon:Sight.profiles.ribbon,
-  laser: { range: 950, wait: 4, damage: 100 }
+  laser: { range: Sight.laser.reach, wait: 4, damage: 100 }
 };
 function distance2(a,b){return (a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2;}
 const silent = {pitch:0,roll:0,yaw:0,throttle:0};
@@ -41,8 +41,9 @@ class Arena {
     return player;
   }
   reset(player) {
+    player.marks=new Map();player.focus=null;player.lastFired=null;
     Object.assign(player,{body:spawn(player.slot,player.type,this.mission&&!player.bot),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:12,flareChargeAt:0,
-      tags:new Map(),acquire:0,lockLife:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
+      tags:new Map(),acquire:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
   }
   remove(id) {
     this.tracers=this.tracers.filter(t=>t.owner!==id);
@@ -53,6 +54,29 @@ class Arena {
   }
   opponents(a,b) {
     return b && a!==b && (!this.mission || a.bot!==b.bot);
+  }
+  scan(player,spec,dt) {
+    const marks=player.marks,requested=this.players.get(player.target);
+    const cooling=player[player.weapon+'At']>this.time;
+    const eligible=peer=>this.opponents(player,peer)&&peer.hp>0&&peer.shield<=this.time
+      && !(cooling&&player.lastFired===peer.id)
+      && Sight.inRing(player.body,peer.body.pos,spec.ring,spec.reach,spec.inner);
+    for(const [id,mark] of marks){
+      const peer=this.players.get(id);
+      if(!eligible(peer)||peer.life!==mark.life)marks.delete(id);
+    }
+    if(!marks.has(player.target)&&eligible(requested)){
+      if(marks.size===Sight.trackSlots)marks.delete([...marks.keys()].at(-1));
+      marks.set(requested.id,{life:requested.life,time:0});
+    }
+    for(const peer of this.players.values()){
+      if(marks.size>=Sight.trackSlots)break;
+      if(!marks.has(peer.id)&&eligible(peer))marks.set(peer.id,{life:peer.life,time:0});
+    }
+    for(const mark of marks.values())mark.time=Math.min(spec.fill,mark.time+dt);
+    player.focus=marks.has(player.target)?player.target:(marks.keys().next().value??null);
+    player.acquire=marks.get(player.focus)?.time??0;
+    return this.players.get(player.focus);
   }
   input(player,data) {
     const controls={};
@@ -73,18 +97,23 @@ class Arena {
       if(!Outfit.valid(data.kit))return false;
       if(player.kit!==data.kit){
         player.kit=data.kit;player.refitAt=this.players.size<2?this.time:this.time+5;
-        player.laser=0;player.acquire=0;player.fire=false;
+        player.laser=0;player.acquire=0;player.marks.clear();player.focus=null;player.fire=false;
         if(!Outfit.has(player.kit,player.weapon))player.weapon=Outfit.first(player.kit);
       }
     }
     if(player.hp<=0) return true;
     const equipped=Outfit.has(player.kit,data.weapon);
-    if(player.target!==data.target || player.weapon!==data.weapon)player.acquire=0;
+    const selectionChanged=player.target!==data.target || player.weapon!==data.weapon;
+    if(equipped && player.weapon!==data.weapon){player.marks.clear();player.focus=null;player.acquire=0;}
     if(player.target!==data.target || player.weapon!==data.weapon || !data.fire) player.laser=0;
     player.controls=controls; if(equipped)player.weapon=data.weapon;
     player.target=this.opponents(player,this.players.get(data.target))?data.target:null;
     player.tap=equipped && data.weapon==='gun' && data.tap===true;
     player.fire=equipped && data.fire===true; player.lastInput=this.time;
+    // The sync reply is sent before the next physics tick. Echo the new primary
+    // immediately without awarding a second slice of capture time.
+    if(selectionChanged && equipped && Sight.profiles[player.weapon] && player.refitAt<=this.time && player.shield<=this.time)
+      this.scan(player,Sight.profiles[player.weapon],0);
     if(data.dodge===true && this.time>=player.dodgeAt && !player.puffs && player.flareCells){
       player.puffs=Math.min(3,player.flareCells);
       player.dodgeAt=this.time+1.55;
@@ -192,7 +221,8 @@ class Arena {
       }
       if(player.hot || this.time-player.lastGun>.28)player.heat=Math.max(0,player.heat-dt*.32);
       if(player.hot && player.heat<=.2)player.hot=false;
-      const other=this.players.get(player.target), spec=weapons[player.weapon];
+      let other=this.players.get(player.target);
+      const spec=weapons[player.weapon];
       if(player.echo && this.time>=player.echo.until){
         const center=player.echo.pos;
         this.event('chime',player,player,center,center);
@@ -211,15 +241,12 @@ class Arena {
         }
         player.glyph=null;
       }
-      const available=player.hp>0 && player.refitAt<=this.time && player.shield<=this.time && this.time-player.lastInput<=.45;
+      const armed=player.hp>0 && player.refitAt<=this.time && player.shield<=this.time;
+      const inputAge=this.time-player.lastInput;
+      const available=armed && inputAge<=.45;
       const missile=Sight.profiles[player.weapon];
-      const tracking=available && missile && player[player.weapon+'At']<=this.time && other?.hp>0 && other!==player &&
-        other.shield<=this.time && Sight.inRing(player.body,other.body.pos,missile.ring,missile.reach,missile.inner);
-      if(!tracking || player.lockLife!==other?.life)player.acquire=0;
-      if(tracking){
-        player.lockLife=other.life;
-        player.acquire=Math.min(missile.fill,player.acquire+dt);
-      }
+      if(armed && missile && inputAge<=1.5)other=this.scan(player,missile,dt);
+      else if(player.marks.size){player.marks.clear();player.focus=null;player.acquire=0;}
       const freeGun=player.weapon==='gun' && player.hp && player.refitAt<=this.time && (available||!competitive);
       if(freeGun && (player.fire||player.tap) && !player.hot && player.gunAt<=this.time+1e-8){
         const b=player.body,dir=b.basis.f;
@@ -280,17 +307,18 @@ class Arena {
       }
       const point=other.body.pos;
       if(missile){
-        if(!tracking || player.acquire<missile.fill)continue;
-      }else if(!Sight.inRing(player.body,point,.16,spec.range)){
+        if(player.acquire<missile.fill || (player.target && player.target!==other.id))continue;
+      }else if(!Sight.inRing(player.body,point,Sight.laser.ring,spec.range)){
         player.laser=0;continue;
       }
       const key=player.weapon+'At';
       if(player[key]>this.time)continue;
-      if(player.weapon==='laser' && (player.laser+=dt)<2.2)continue;
+      if(player.weapon==='laser' && (player.laser+=dt)<Sight.laser.fill)continue;
       player[key]=this.time+spec.wait;player.laser=0;
       this.event(player.weapon,player,other,player.body.pos,point);
       if(missile){
-        this.shots.push(Bolts.launch(++this.shotId,player,other,player.weapon));player.acquire=0;
+        this.shots.push(Bolts.launch(++this.shotId,player,other,player.weapon));
+        player.lastFired=other.id;player.marks.delete(other.id);player.focus=null;player.acquire=0;
       }else hits.push([player,other,spec.damage]);
     }
     // Finite-lived arcade streaks. Sample the short tick segment in order so scenery
@@ -410,12 +438,13 @@ class Arena {
         heat:player.heat,hot:player.hot,kit:player.kit,weapon:player.weapon,refit:remain(player.refitAt),
         star:this.rule==='crown'?{id:this.starId,seconds:Math.floor(this.starTime)}:undefined,
         beacon:{site:this.beaconSite(),left:Math.ceil(Lake.relayDuration-this.matchTime%Lake.relayDuration),count:this.zoneCount,hold:player.id===this.holder?Math.floor(this.hold*10)/10:0},
-        lock:player.laser/2.2,shield:remain(player.shield),revive:remain(player.revive),cool:remain(player[player.weapon+'At']),
-        flares:player.flareCells,puffs:player.puffs,dodge:remain(player.dodgeAt),diverted:player.divertUntil>this.time,acquire:Math.round(100*player.acquire/(Sight.profiles[player.weapon]?.fill||1)),
-        warned:[...this.players.values()].some(p=>p.hp&&p.target===player.id&&((p.lockLife===player.life&&p.acquire>0)||p.laser>0)),
+        lock:player.laser/Sight.laser.fill,shield:remain(player.shield),revive:remain(player.revive),cool:remain(player[player.weapon+'At']),
+        flares:player.flareCells,puffs:player.puffs,dodge:remain(player.dodgeAt),diverted:player.divertUntil>this.time,acquire:Sight.percent(player.acquire,Sight.profiles[player.weapon]?.fill||1),
+        warned:[...this.players.values()].some(p=>p.hp&&(p.marks.get(player.id)?.life===player.life||(p.target===player.id&&p.laser>0))),
         incoming:this.shots.some(shot=>!shot.diverted&&shot.to===player.id&&shot.life===player.life)},
       shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type]),
       events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
+    if(Sight.profiles[player.weapon])result.tracking={focus:player.focus,marks:[...player.marks].map(([id,mark])=>[id,Sight.percent(mark.time,Sight.profiles[player.weapon].fill)])};
     if(this.mission)result.mission=this.mission.snapshot(this.time);
     if(compactSelf)result.self=PeerPose.packSelf(result.self);
     return result;

@@ -1,5 +1,5 @@
-// Three authored arcade movement beats. Each commits to a board location;
-// the last beat stays there even if its intended recipient flies away.
+// Three authored animation beats. The last keyframe attaches to the avatar
+// until a strong control input or a flare breaks the arcade tether.
 const Contact=require('./contacts.cjs');
 const groundAt=require('./terrain.js').makeHeightSampler();
 const squareDistance=(a,b)=>(a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2;
@@ -18,10 +18,15 @@ function launch(id,from,to,type='missile'){
 }
 function divert(shot,point){
   if(shot.diverted)return;
-  shot.diverted=true;leg(shot,point,1,.46,15);
+  shot.diverted=true;shot.attached=false;leg(shot,point,1,.46,15);
 }
 function move(shot,target,dt){
   if(!target?.hp||target.life!==shot.life)return 'fade';
+  if(shot.attached){
+    const [pitch,,roll]=target.body.controls;
+    if(Math.abs(roll)>.72 || Math.abs(pitch)>.78)shot.attached=false;
+    else for(let i=0;i<3;i++)shot.end[i]=target.body.pos[i];
+  }
   shot.elapsed+=dt;
   const t=Math.min(1,shot.elapsed/shot.duration);
   for(let i=0;i<3;i++){
@@ -36,7 +41,7 @@ function move(shot,target,dt){
   shot.stage++;
   if(shot.stage===1 && shot.type==='ribbon')leg(shot,target.body.pos,.63,.78,38);
   else if(shot.stage===1)leg(shot,target.body.pos,.65,.34,5);
-  else leg(shot,target.body.pos,1.8,shot.type==='ribbon'?.82:.38,0);
+  else {leg(shot,target.body.pos,1,shot.type==='ribbon'?.82:.38,0);shot.attached=true;}
   return null;
 }
 function obstacle(shot){
