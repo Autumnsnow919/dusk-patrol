@@ -52,9 +52,27 @@ for(const [i,x] of [0,100,240,305].entries()){
 party.input(sender,command('arc',{kit:echoArc,fire:true,target:selected.id}));
 party.tick(Flight.tick);assert.equal(selected.hp,100);
 party.time=6;
-party.input(sender,command('arc',{fire:true,target:selected.id}));party.tick(Flight.tick);
-assert.deepEqual(pilots.map(p=>p.hp),[100,82,88,100]);
-party.tick(Flight.tick);assert.equal(near.hp,88);
+const cast=()=>{party.input(sender,command('arc',{fire:true,target:selected.id}));party.tick(Flight.tick);};
+cast();assert.equal(sender.arcCast,null,'side target cannot start a chain');
+selected.body.pos=[0,1400,100];cast();assert.equal(sender.arcCast,null,'rear target cannot start a chain');
+selected.body.pos=[0,1400,-430];cast();assert.equal(sender.arcCast,null,'out of range');
+selected.body.pos=[0,1400,-150];cast();
+assert.equal(party.snapshot(selected,0).self.arcThreat,sender.id);assert.equal(selected.hp,100);
+selected.body.pos=[150,1400,-20];party.tick(Flight.tick);
+assert.equal(party.snapshot(selected,0).self.arcThreat,null);assert.equal(selected.hp,100);
+assert(sender.arcAt>party.time,'breaking the chain spends the cooldown');
+party.time=sender.arcAt+.01;
+selected.body.pos=[0,1400,-135];cast();
+assert(sender.arcCast);party.input(sender,command('echo',{target:selected.id}));
+party.tick(Flight.tick);assert.equal(sender.arcCast,null,'switching weapons breaks the chain');
+party.time=sender.arcAt+.01;
+for(const [i,[x,z]] of [[0,0],[0,-180],[54,-225],[58,-172]].entries())pilots[i].body=Flight.create('ember',[x,1400,z],0);
+cast();party.input(sender,command('arc',{fire:false,target:selected.id}));
+for(let i=0;i<100;i++)party.tick(Flight.tick);
+assert.equal(selected.hp,100,'telegraph precedes damage');
+for(let i=0;i<12;i++)party.tick(Flight.tick);
+assert.deepEqual(pilots.map(p=>p.hp),[100,86,94,100]);
+assert.deepEqual(party.events.filter(e=>e.loss).map(e=>[e.kind,e.weapon,e.loss]),[['arc','arc',14],['arcHop','arc',6]]);
 party.input(sender,command('echo',{fire:true}));party.tick(Flight.tick);
 assert(sender.echo && sender.echoAt>party.time+4);
 const siteOfEcho=sender.echo.pos.slice();
@@ -64,7 +82,7 @@ for(let i=0;i<122;i++){
   near.body.pos=siteOfEcho.map((n,k)=>n+(k===0?240:0));
   party.tick(Flight.tick);
 }
-assert.equal(selected.hp,54);assert.equal(near.hp,88);assert.equal(sender.hp,100);
+assert.equal(selected.hp,58);assert.equal(near.hp,94);assert.equal(sender.hp,100);
 assert.equal(party.events.filter(e=>e.kind==='chime').length,1);
 const pose=require('./peer-pose.js'),fields=require('./airfields.js');
 for(const p of [sender,selected]){
@@ -83,8 +101,9 @@ async function network(){
   try{
     const join=(room,mode)=>post('join',{room,mode,type:'kite'});
     const p=await join('DUEL','pvp');
+    assert.equal((await post('join',{room:'DUEL',mode:'pvp',type:'kite',protocol:14})).reason,'version');
     assert.equal((await post('join',{room:'DUEL',mode:'pvp',type:'j16',kit:15})).status,400);
-    const custom=await post('join',{room:'CUSTOM',mode:'pve',type:'j16',kit:65,protocol:14});
+    const custom=await post('join',{room:'CUSTOM',mode:'pve',type:'j16',kit:65,protocol:15});
     const load=await post('sync',command('ribbon',{controls:{pitch:.35,roll:-.2,yaw:0,throttle:.1,keyboard:true}}),custom.token);
     assert.equal(load.self.kit,65);assert.equal(load.self.weapon,'ribbon');assert.equal(load.self.refit,0);
     assert.equal((await post('sync',command('gun',{controls:{pitch:1.1,roll:0,yaw:0,throttle:0}}),custom.token)).status,400);

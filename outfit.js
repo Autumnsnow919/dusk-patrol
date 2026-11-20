@@ -10,7 +10,7 @@ const Outfit = (() => {
     {id:'glyph',name:'染光印',cost:3,tip:'给对手所在空域盖章。1.2 秒后仍在光圈内会被染中。'},
     {id:'ribbon',name:'流光远程弹',cost:5,tip:'远距窄圈，近距盲区，蓄锁和冷却较长'},
     {id:'echo',name:'回声浮标',cost:3,tip:'原地留下紫环，1 秒后响起，触及环内所有对手；冷却 5 秒'},
-    {id:'arc',name:'跳光链',cost:4,tip:'连接选中的近处对手，再跳到离它最近的另一架飞机；冷却 6 秒'}
+    {id:'arc',name:'跳光链',cost:4,tip:'把目标留在机头圈内 0.9 秒。出圈断链，近处第二架最多受 6 点伤害。冷却 6 秒'}
   ];
   const keys=['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit8','Digit9','Minus'];
   const keyLabel=i=>keys[i]==='Minus'?'−':keys[i].slice(5);

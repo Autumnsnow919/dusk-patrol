@@ -11,7 +11,8 @@ const CockpitLayouts = (() => {
     loom:['pod','hoop'],       nocturne:['wide','facet'],     ember:['sport','bow'],
     tandem:['pod','bow'],      cirrus:['wide','bubble'],      ibis:['pod','facet'],
     quill:['offset','bubble'], ogee:['twin','bow'],           su27:['six','facet'],
-    j10:['portrait','hoop'],   j20:['wide','brace'],          j16:['twin','bubble']
+    j10:['portrait','hoop'],   j20:['wide','brace'],          j16:['twin','bubble'],
+    f4:['six','split'],        f16:['offset','clear'],        f22:['wide','hoop']
   };
   // Station coordinates are fractions of the available instrument bank.
   const banks = {
@@ -137,7 +138,8 @@ const Cockpit = (function (fleet,sight) {
     const half=Math.min(Math.floor(W*.38),Math.ceil(H*.32));
     const aimY=(top+bottom)/2+8;
     // Reserve the heading tape and lower readouts around the widest game ring.
-    const focal=Math.max(1,Math.min(H/(2*Math.tan(.66)),(half-5)*.86/sight.ring,(bottom-top-32)*.39/sight.ring));
+    const widest=Math.max(sight.ring,sight.arc.ring);
+    const focal=Math.max(1,Math.min(H/(2*Math.tan(.66)),(half-5)*.86/widest,(bottom-top-32)*.39/widest));
     glassFit={left:(W>>1)-half,right:(W>>1)+half,top,bottom,aimY,fov:2*Math.atan(H/(2*focal))};
     return glassFit;
   }
@@ -191,7 +193,7 @@ const Cockpit = (function (fleet,sight) {
     // canopy bow
     for (let x = 0; x < W; x++) {
       const t = Math.abs((x - cx) / (W / 2));
-      const yb = Math.round(canopy==='bubble'?2+7*t**4:canopy==='facet'?4+Math.max(0,t-.54)*58:canopy==='hoop'?7+36*t**3:canopy==='brace'?5+12*t:9+17*t*t);
+      const yb = Math.round(canopy==='clear'?2+3*t**6:canopy==='split'?5+13*t*t:canopy==='bubble'?2+7*t**4:canopy==='facet'?4+Math.max(0,t-.54)*58:canopy==='hoop'?7+36*t**3:canopy==='brace'?5+12*t:9+17*t*t);
       for (let y = 0; y <= yb; y++) px(x, y, y < 3 ? K.f0 : y > yb - 1 ? K.ink : y > yb - 2 ? K.fHi : y > yb - 4 ? K.f2 : K.f1);
       if ((x - cx) % 26 === 0) { px(x, yb - 6, K.fHi); px(x, yb - 5, K.f0); }
     }
@@ -204,9 +206,9 @@ const Cockpit = (function (fleet,sight) {
       }
       if (y % 22 === 11) { px(w - 8, y, K.fHi); px(w - 8, y + 1, K.f0); px(W - 1 - w + 8, y, K.f2); px(W - 1 - w + 8, y + 1, K.ink); }
     }
-    if(canopy==='brace'||canopy==='facet'){
+    if(canopy==='brace'||canopy==='facet'||canopy==='split'){
       for(const side of [-1,1]){
-        const a=cx+side*Math.round(cx*(canopy==='brace'?.55:.77)),b=cx+side*(cx-11);
+        const a=cx+side*Math.round(cx*(canopy==='split'?.28:canopy==='brace'?.55:.77)),b=cx+side*(cx-11);
         const end=canopy==='brace'?y0+2:Math.round(y0*.52);
         for(let i=-2;i<=2;i++)line(a+i,4,b+i,end,i===-2?K.fHi:i===2?K.ink:K.f1);
       }
@@ -229,7 +231,7 @@ const Cockpit = (function (fleet,sight) {
         px(x, y, c);
       }
     }
-    const stencil=({su27:'SU-27',j10:'J-10',j16:'J-16',j20:'J-20',rv8a:'RV-8A'})[type]||type.toUpperCase();
+    const stencil=({f4:'F-4C',f16:'F-16A',f22:'F-22A',su27:'SU-27',j10:'J-10',j16:'J-16',j20:'J-20',rv8a:'RV-8A'})[type]||type.toUpperCase();
     const tagW=textW(stencil)+9,tagY=y0+6;
     rect(cx-(tagW>>1),tagY-1,tagW,8,K.plateLo);text(stencil,cx-(textW(stencil)>>1),tagY,K.tick);
     if(bank!=='six'){buildBank();return;}
@@ -442,10 +444,12 @@ const Cockpit = (function (fleet,sight) {
         const nx=Math.round(n[0]),ny=Math.round(n[1]);
         arc(nx,ny,3,0,Math.PI*2,g);rect(nx-9,ny,5,1,g);rect(nx+5,ny,5,1,g);rect(nx,ny-6,1,3,g);
       }
-      const ring=combat && (room.weapon==='laser'?sight.laser:sight.profiles[room.weapon]);
+      const ring=combat && sight.reticle(room.weapon);
       if(axes && ring){
-        const charge=room.weapon==='laser'?Math.floor(room.self.lock*100):room.marks.get(room.target)||0;
-        const color=charge>=100?K.hudWarn:charge?K.hud:K.tick;
+        const charge=(room.weapon==='laser'||room.weapon==='arc')?Math.floor(room.self.lock*100):room.marks.get(room.target)||0;
+        const point=room.weapon==='arc' && room.peers.get(room.target)?.displayPos;
+        const aligned=room.weapon==='arc' && point && sight.inRing({pos:S.pos,basis:axes},point,ring.ring,ring.reach);
+        const color=charge>=100?K.hudWarn:charge||aligned?K.hud:K.tick;
         const points=captureContour(cam,axes,ring.ring,projectDirection);
         for(const offset of [1,0]){
           let previous=points[points.length-1];

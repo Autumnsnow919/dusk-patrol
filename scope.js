@@ -15,16 +15,24 @@ class DuelScope {
     this.radarY=ry;
     g.font='500 12px "IBM Plex Mono", monospace';g.lineWidth=1;
     const focal=h/(2*Math.tan(cam.fov/2)),gold='#ffd884',cream='#fff3dc',teal='#8ed8c0',red='#ff9364',ink='#1b1326';
-    function project(p){
+    function project(p,allowBelowGlass=false){
       const x=p[0]-cam.pos[0],y=p[1]-cam.pos[1],z=p[2]-cam.pos[2];
       const dot=a=>x*a[0]+y*a[1]+z*a[2],depth=dot(cam.B.f);
       if(depth<1)return null;
       const py=Math.round(h/2-dot(cam.B.u)*focal/depth);
-      if(seated && py>=windowFloor)return null;
+      if(seated && !allowBelowGlass && py>=windowFloor)return null;
       return [Math.round(w/2+dot(cam.B.r)*focal/depth),py];
     }
+    function projectBeam(a,b){
+      const depth=p=>(p[0]-cam.pos[0])*cam.B.f[0]+(p[1]-cam.pos[1])*cam.B.f[1]+(p[2]-cam.pos[2])*cam.B.f[2];
+      const da=depth(a),db=depth(b),near=1.1;
+      if(da<near && db<near)return null;
+      if(da>=near && db>=near)return [project(a,true),project(b,true)];
+      const t=(near-da)/(db-da),cut=a.map((v,i)=>v+(b[i]-v)*t);
+      return [project(da<near?cut:a,true),project(db<near?cut:b,true)];
+    }
     function path(points,close=false){
-      if(points.some(p=>!p))return;
+      if(!points || points.some(p=>!p))return;
       g.beginPath();g.moveTo(...points[0]);for(let i=1;i<points.length;i++)g.lineTo(...points[i]);
       if(close)g.closePath();g.stroke();
     }
@@ -35,7 +43,7 @@ class DuelScope {
       g.fillStyle=col;g.fillText(txt,x,y);
     }
     const duel=room.combat,self=room.self,basis=Flight.axes(body.quat),target=room.peers.get(room.target);
-    const range=duel?(Sight.profiles[room.weapon]?.reach||Sight.reach):4000;
+    const range=duel?(Sight.reticle(room.weapon)?.reach||Sight.reach):4000;
     const showTarget=duel && target?.hp;
     const pos=showTarget?target.displayPos:null;
     const targetRange=pos?Math.hypot(pos[0]-body.pos[0],pos[1]-body.pos[1],pos[2]-body.pos[2]):Infinity;
@@ -88,7 +96,7 @@ class DuelScope {
     }
     if(!duel||!self)return;
     if(!seated){
-      const reticle=room.weapon==='laser'?Sight.laser:Sight.profiles[room.weapon];
+      const reticle=Sight.reticle(room.weapon);
       const dist=target?Math.max(75,Math.min(reticle?.reach||Sight.reach,targetRange)):650;
       const axisPoint=body.pos.map((v,i)=>v+basis.f[i]*dist),aim=project(axisPoint);
       g.strokeStyle=cream;
@@ -99,8 +107,9 @@ class DuelScope {
           dots.push(project(axisPoint.map((v,d)=>v+reticle.ring*dist*(co*basis.r[d]+si*basis.u[d]))));
         }
         g.lineWidth=3;g.strokeStyle='#292335';path(dots,true);
-        const charge=room.weapon==='laser'?Math.floor(100*self.lock):room.marks.get(room.target)||0;
-        g.lineWidth=1;g.strokeStyle=charge===100?gold:charge?teal:cream;path(dots,true);
+        const charge=(room.weapon==='laser'||room.weapon==='arc')?Math.floor(100*self.lock):room.marks.get(room.target)||0;
+        const aligned=room.weapon==='arc' && pos && Sight.inRing(body,pos,reticle.ring,reticle.reach);
+        g.lineWidth=1;g.strokeStyle=charge===100?gold:charge||aligned?teal:cream;path(dots,true);
         const bottom=dots[18];
         if(charge && bottom)label(charge===100?'LOCK':charge+'%',bottom[0]-15,bottom[1]+16,g.strokeStyle);
       }
@@ -114,42 +123,112 @@ class DuelScope {
         path([[x,y-5],[x+5,y],[x,y+5],[x-5,y]],true);
       }
     }
+    const bearing=(point,origin=body.pos)=>{
+      const dx=point[0]-origin[0],dy=point[1]-origin[1],dz=point[2]-origin[2];
+      const dot=axis=>dx*axis[0]+dy*axis[1]+dz*axis[2];
+      return Math.atan2(dot(basis.r),dot(basis.f));
+    };
+    const bearingName=angle=>['前','右前','右','右后','后','左后','左','左前'][(Math.round(angle*4/Math.PI)+8)%8];
+    const noticeY=Math.min(h*.36,windowFloor*.64),cx=w/2;
+    function centered(text,y,color){label(text,cx-g.measureText(text).width/2,Math.min(y,windowFloor-4),color);}
+    const arcSource=self.arcThreat && room.peers.get(self.arcThreat);
+    if(arcSource)centered('跳光链蓄力 · '+bearingName(bearing(arcSource.displayPos))+'方 · 脱离对手机头圈',noticeY,gold);
+    const hurt=room.hurt,strike=room.strike;
+    if(hurt && now-hurt.born<1150){
+      const angle=bearing(hurt.source??hurt.a,hurt.b),r=24,cy=noticeY+27;
+      g.strokeStyle=red;g.lineWidth=4;
+      g.beginPath();g.arc(cx,cy,r,angle-Math.PI/2-.45,angle-Math.PI/2+.45);g.stroke();g.lineWidth=1;
+      centered(bearingName(angle)+'方中弹 · '+Outfit.items.find(item=>item.id===hurt.weapon).name+' · '+Airfields.labels[hurt.part]+' −'+Math.ceil(hurt.loss),cy+40,red);
+    }
+    if(strike && now-strike.born<750){
+      const point=project(strike.b);
+      if(point){
+        g.strokeStyle=cream;g.lineWidth=2;
+        for(const x of [-1,1])for(const y of [-1,1])path([[point[0]+x*9,point[1]+y*9],[point[0]+x*4,point[1]+y*4]]);
+        g.lineWidth=1;
+      }
+      centered('命中 '+(room.peers.get(strike.to)?.name||'目标')+' · '+Airfields.labels[strike.part]+' −'+Math.ceil(strike.loss),noticeY+85,teal);
+    }
+    for(const shot of room.shots.values()){
+      const point=project(shot.shown);
+      if(!point)continue;
+      const [x,y]=point;
+      if(x<0||x>w||y<0||y>windowFloor)continue;
+      g.strokeStyle=shot.diverted?teal:shot.threat?red:gold;g.lineWidth=2;
+      const tail=project(shot.shown.map((v,i)=>v-shot.front[i]*24));
+      path([tail,point]);path([[x,y-4],[x+4,y],[x,y+4],[x-4,y]],true);g.lineWidth=1;
+    }
     if(self.incoming||self.warned){
-      const txt=self.incoming?room.flareReadout(true):'锁定预警';
+      let txt=self.incoming?room.flareReadout(true):'锁定预警';
+      if(!self.incoming && self.laserThreat){
+        const painter=room.peers.get(self.laserThreat);
+        if(painter)txt=bearingName(bearing(painter.displayPos))+'方激光照射 · 脱离光圈';
+      }
+      if(self.incoming){
+        let nearest=null,best=Infinity;
+        for(const shot of room.shots.values())if(shot.threat){
+          const d=Math.hypot(...shot.shown.map((v,i)=>v-body.pos[i]));
+          if(d<best){best=d;nearest=shot;}
+        }
+        if(nearest)txt=bearingName(bearing(nearest.shown))+'方 · '+txt;
+      }
       label(txt,seated?w-108:w/2-g.measureText(txt).width/2,seated?ry+R+45:h*.21,self.incoming?red:gold);
     }
     if(!room.events.length)return;
-    let glyphWarning=false;
+    let areaWarning=null;
     if(seated){g.save();g.beginPath();g.rect(0,0,w,windowFloor);g.clip();}
     for(const event of room.events){
       const age=(now-event.born)/1000,from=project(event.a),to=project(event.b);
       g.strokeStyle=event.kind==='laser'?teal:gold;
+      if(event.kind==='arcBreak' && age<.65 && !arcSource && !self.lock && (event.to===room.id||event.from===room.id))
+        centered(event.to===room.id?'已脱离跳光链':'跳光链中断',noticeY,teal);
+      if(event.kind==='arcWindup' && age<Sight.arc.fill &&
+        ((self.arcThreat===event.from && event.to===room.id)||(event.from===room.id && self.weapon==='arc' && self.lock>0))){
+        const beam=projectBeam(room.peers.get(event.from)?.displayPos??body.pos,room.peers.get(event.to)?.displayPos??body.pos);
+        g.strokeStyle=gold;g.setLineDash([4,5]);path(beam);g.setLineDash([]);
+      }
       if(event.kind==='echo' && age<1){
         g.strokeStyle='#d5a2ff';
         const edge=project(event.a.map((v,i)=>v+155*cam.B.r[i]));
         if(from && edge)circle(from,Math.max(3,Math.abs(edge[0]-from[0])));
         circle(from,4+10*(1-age));
+        if(room.hostile({id:event.from}) && event.from!==room.id && Math.hypot(...body.pos.map((v,i)=>v-event.a[i]))<155)
+          areaWarning='回声浮标 · 飞出紫圈';
       }
       if(event.kind==='chime' && age<.5){g.strokeStyle='#e5c8ff';circle(from,8+96*age);}
-      if((event.kind==='arc'||event.kind==='arcHop') && age<.32 && from && to){
+      if((event.kind==='arc'||event.kind==='arcHop') && age<.32){
+        const ends=projectBeam(event.a,event.b);if(!ends)continue;
+        const [start,end]=ends;
         g.strokeStyle=event.kind==='arc'?'#abfff0':'#f9df93';
-        const mx=(from[0]+to[0])/2,my=(from[1]+to[1])/2;
-        path([from,[mx+3,my-5],[mx-2,my+4],to]);circle(to,4+age*25);
+        const mx=(start[0]+end[0])/2,my=(start[1]+end[1])/2;
+        const bolt=[start,[mx+6,my-7],[mx-4,my+5],end];
+        g.lineWidth=5;path(bolt);g.lineWidth=1;g.strokeStyle='#fff7df';path(bolt);circle(to,5+age*35);
       }
       if(event.kind==='glyph' && age<1.2){
-        g.strokeStyle='#f5aedc';circle(to,8+25*(1-age/1.2));
-        if(room.id===event.to)glyphWarning=true;
+        g.strokeStyle='#f5aedc';
+        const edge=project(event.b.map((v,i)=>v+115*cam.B.r[i]));
+        if(to && edge){g.lineWidth=2;circle(to,Math.max(3,Math.abs(edge[0]-to[0])));g.lineWidth=1;circle(to,5);}
+        if(room.id===event.to && Math.hypot(...body.pos.map((v,i)=>v-event.b[i]))<=115)areaWarning='染光印 · 飞出粉圈';
       }
       if(event.kind==='bloom' && age<.55){g.strokeStyle='#fed3ec';circle(to,5+age*74);}
       if((event.kind==='prism'||event.kind==='refract')&&age<.65){
         g.strokeStyle=teal;circle(to,14+18*age);circle(to,18+24*age);
       }
-      if(event.kind==='pulse'&&age<.5)circle(from,8+age*75);
+      if(event.kind==='pulse' && from && age<.5){
+        const edge=project(event.a.map((v,i)=>v+290*cam.B.r[i]));
+        if(edge){
+          const radius=Math.max(3,Math.abs(edge[0]-from[0])*Math.min(1,age/.32));
+          g.lineWidth=3;circle(from,radius);g.lineWidth=1;circle(from,radius*.92);
+        }
+      }
       if(event.kind==='burst'&&age<.6)circle(to,5+age*25);
-      if(event.kind==='laser'&&age<.15)path([from,to]);
+      if(event.kind==='laser'&&age<.26){
+        const beam=projectBeam(event.a,event.b);
+        g.strokeStyle=teal;g.lineWidth=5;path(beam);g.strokeStyle=cream;g.lineWidth=1;path(beam);circle(to,4+50*age);
+      }
     }
     if(seated)g.restore();
-    if(glyphWarning)label('染光印 · 飞离印记',seated?w-108:w*.5-55,seated?ry+R+61:h*.26,'#f5aedc');
+    if(areaWarning)centered(areaWarning,noticeY-18,'#f5aedc');
   }
 }
 

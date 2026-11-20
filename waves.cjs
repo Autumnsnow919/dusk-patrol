@@ -48,6 +48,7 @@ function chooseAction(arena,drone,opponent,effects){
   else if(drone.alertAt===null)drone.alertAt=now+(drone.fire?1.2:.65)+.12*drone.lane;
   input.dodge=incoming && now>=drone.alertAt && drone.shield<=now;
   if(drone.shield>now || drone.refitAt>now)return input;
+  if(drone.arcCast){input.weapon='arc';input.target=drone.arcCast.id;return input;}
   if(drone.prismDue!==null && drone.prismDue<=now){
     drone.prismDue=null;
     input.weapon='prism';input.fire=true;return input;
@@ -65,7 +66,7 @@ function chooseAction(arena,drone,opponent,effects){
       }
     }else{
       if(drone[id+'At']>now)continue;
-      const reticle=Sight.profiles[id] || (id==='laser'?Sight.laser:null);
+      const reticle=Sight.reticle(id);
       const ready=reticle?Sight.inRing(body,point,reticle.ring,reticle.reach,reticle.inner):distance<=effects[id].range;
       if(!ready)continue;
     }

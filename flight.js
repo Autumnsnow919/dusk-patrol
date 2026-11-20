@@ -41,6 +41,9 @@ const Flight = (() => {
   fleet.j10={...fleet.wisp,name:'歼-10',role:'单发鸭式 · 外形复刻',singleEngine:true,elevon:true,landingFlaps:true,roll:4.5,noseLength:10.8};
   fleet.j20={...fleet.cirrus,name:'歼-20',role:'双发鸭式 · 外形复刻',noseLength:13.5,wingLevel:false,yawDamper:true};
   fleet.j16={...fleet.comet,name:'歼-16',role:'串列双座 · 外形复刻',noseLength:12.1,roll:3.15,pitch:1.72,yawDamper:true};
+  fleet.f4={...fleet.comet,name:'F-4C 鬼怪 II',role:'折翼双座',noseLength:11.8,roll:2.95,yawDamper:true};
+  fleet.f16={...fleet.petrel,name:'F-16A 战隼',role:'单发轻型',singleEngine:true,noseLength:10.8,roll:5.15,landingFlaps:true};
+  fleet.f22={...fleet.lance,name:'F-22A 猛禽',role:'双尾二维矢量',noseLength:12.4,roll:3.75};
   // Hinge height and station in mesh units, followed by differential and lift-mode travel.
   for(const [type,y,z,mix,lift] of [
     ['kite',.24,4.62,.13,0],['pulse',.24,4.62,0,0],['petrel',.24,4.62,.19,0],['aurora',.24,4.62,.12,0],
@@ -54,9 +57,12 @@ const Flight = (() => {
   const highPower={quill:81000,ogee:114000,cirrus:108000,ibis:73000,nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
     needle:16000,delta:90000,petrel:65000,aurora:99000,spire:80000,skate:74000,wisp:70000,opal:70000,lance:81000};
   for(const [type,boost] of Object.entries(highPower))fleet[type].highPower=boost;
-  for(const [type,preset] of [['su27','comet'],['j10','wisp'],['j20','cirrus'],['j16','comet']])
+  for(const [type,preset] of [['su27','comet'],['j10','wisp'],['j20','cirrus'],['j16','comet'],['f4','comet'],['f16','petrel'],['f22','lance']])
     fleet[type].highPower=fleet[preset].highPower;
   const cards={
+    f4:['航向阻尼','串列双座，外翼向上折，平尾向下斜。滚转手感偏沉，按住 V 稳住航向。',[7.5,.97,-3.65],[.42,.49,.34]],
+    f16:['增升襟翼','单座泡形舱盖，翼根向前伸，机腹下只有一个进气口。滚转轻快，按 V 放襟翼进近。',[6.2,.12,-2.85],[.58,.66,.73]],
+    f22:['二维矢量','宽菱形主翼、外倾双尾和扁喷口。按住 V 配合 W/S，能看到喷口和尾焰一起俯仰。',[7.5,.20,-2.85],[.43,.5,.54]],
     su27:['翼平辅助','蓝色单座机，翼根前伸，两根直立尾翼之间伸出尾锥。松开 A/D 并按住 V，适合改平后加入编队。',[7.85,.22,-3.6],[.45,.67,.84]],
     j10:['增升进近','机腹进气，单喷口，主翼前方装有活动鸭翼。V 放下内襟翼，轻点 W/S 可以看到鸭翼偏转。',[6.15,.16,-4.45],[.71,.76,.78]],
     j20:['稳向通场','长机身两侧有折线棱边，鸭翼在主翼之前，两片垂尾向外倾。按住 V 增加航向阻尼。',[7.4,.28,-4.95],[.47,.53,.58]],

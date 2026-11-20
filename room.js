@@ -1,3 +1,4 @@
+const scopeEffects=new Set(['echo','chime','arcWindup','arcBreak','arc','arcHop','glyph','bloom','prism','refract','pulse','burst','laser']);
 class FlightRoom {
   get combat() { return this.mode==='pvp'||this.mode==='pve'; }
   flareReadout(incoming=false) {
@@ -12,7 +13,7 @@ class FlightRoom {
   }
   cycleTarget() {
     const peers=[...this.peers.values()].filter(p=>p.hp&&this.hostile(p));
-    const spec=Sight.profiles[this.weapon];
+    const spec=Sight.reticle(this.weapon);
     let choices=peers;
     if(spec && this.self){
       const body={pos:this.self.pos,basis:Flight.axes(this.self.quat)};
@@ -41,14 +42,15 @@ class FlightRoom {
     this.marks.clear();
     if(this.token) this.request('leave',{},this.token).catch(()=>{});
     this.triggerTap=false;this.tracerTime=-Infinity;this.token=null; this.generation++; this.busy=false; this.peers.clear(); this.shots.clear();this.tracers=new Map();this.seenTracer=0;this.name=''; this.status='单人飞行';
+    this.hurt=null;this.strike=null;
     this.harbor=null; this.mission=null; this.kit=Outfit.standard; this.pendingKit=null;
     this.mode='tour'; this.self=null; this.target=null;this.manualTarget=null; this.weapon='gun'; this.after=0; this.events=[]; this.dodge=false;
   }
   async join(room,type,mode='tour',name='',rule='beacon',kit=Outfit.standard) {
     this.leave();
     const version=this.generation;
-    const reply=await this.request('join',{room,type,mode,name,rule,kit,protocol:14});
-    if(reply.mode!==mode||reply.protocol!==14||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw Object.assign(new Error('旧版房主'),{reason:'version'});}
+    const reply=await this.request('join',{room,type,mode,name,rule,kit,protocol:15});
+    if(reply.mode!==mode||reply.protocol!==15||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw Object.assign(new Error('旧版房主'),{reason:'version'});}
     if(version!==this.generation) { this.request('leave',{},reply.token).catch(()=>{}); return null; }
     this.kit=kit;this.weapon=Outfit.first(kit);
     this.token=reply.token; this.id=reply.id;this.name=reply.name;this.mode=mode;this.rule=rule;this.code=reply.room??room; this.status=this.code+' · 1/8'; this.nextSync=0; return reply;
@@ -102,17 +104,28 @@ class FlightRoom {
             }
           }
         }
+        if(this.self?.life!==self.life){this.hurt=null;this.strike=null;}
         this.self=self;this.after=serial;
         const stamp=performance.now(),ids=new Set();
-        for(const [id,x,y,z,diverted,fx,fy,fz,type] of shots){
+        for(const [id,x,y,z,diverted,fx,fy,fz,type,threat] of shots){
           ids.add(id);const point=[x,y,z],old=this.shots.get(id);
           this.shots.set(id,{prev:(old?.shown??point).slice(),pos:point,shown:(old?.shown??point).slice(),stamp,
-            type,front:[fx,fy,fz],interval:old?Math.min(160,Math.max(35,stamp-old.stamp)):65,diverted,smokeAt:old?.smokeAt??0});
+            type,threat,front:[fx,fy,fz],interval:old?Math.min(160,Math.max(35,stamp-old.stamp)):65,diverted,smokeAt:old?.smokeAt??0});
         }
         for(const id of this.shots.keys())if(!ids.has(id))this.shots.delete(id);
-        for(const event of events)this.onEffect?.(event);
-        for(const event of events) this.events.push({...event,born:performance.now()});
-        this.events=this.events.filter(event=>performance.now()-event.born<1450).slice(-32);
+        for(const event of events){
+          const born=stamp-Math.max(0,clock-event.at*1000);
+          if(scopeEffects.has(event.kind))this.events.push({...event,born});
+          if(event.loss>0){
+            const key=event.to===this.id && event.life===self.life?'hurt':event.from===this.id?'strike':null;
+            if(key){
+              const last=this[key],stack=last && born-last.born<250 && last.weapon===event.weapon && last.part===event.part && last.from===event.from && last.to===event.to && last.life===event.life;
+              this[key]={...event,born,loss:event.loss+(stack?last.loss:0)};
+            }
+          }
+          if(stamp-born<650)this.onEffect?.(event);
+        }
+        this.events=this.events.filter(event=>stamp-event.born<1450).slice(-48);
         if(!this.peers.get(this.target)?.hp){this.target=peers.find(peer=>peer.hp&&this.hostile(peer))?.id??null;this.manualTarget=null;}
         this.onState?.(self);
       }

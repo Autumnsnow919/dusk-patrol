@@ -1,4 +1,4 @@
-// Short mono samples are synthesized once on first use. All timing is in game units.
+// Game cues and the recorded flyby are decoded or synthesized once per audio context.
 class FlightAudio {
   constructor(rate) {
     this.rate=rate;this.bank=new Map();this.guns=new Map();this.counts=new Map();this.lastCue=new Map();
@@ -58,14 +58,22 @@ class FlightAudio {
   // repeated cannon waveform contains twelve different transients per loop.
   sample(name){
     if(this.bank.has(name))return this.bank.get(name);
-    const durations={air:1,gun:12/this.rate,boom:.65,missile:.55,laser:.36,
+    if(name==='boom'){
+      const bytes=atob(boomRecording);
+      const buffer=this.ctx.createBuffer(1,bytes.length/2,22050),out=buffer.getChannelData(0);
+      for(let i=0;i<out.length;i++){
+        const value=bytes.charCodeAt(i*2) | bytes.charCodeAt(i*2+1)<<8;
+        out[i]=(value<32768?value:value-65536)/32768;
+      }
+      this.bank.set(name,buffer);return buffer;
+    }
+    const durations={air:1,gun:12/this.rate,missile:.55,laser:.36,
       pulse:.47,flare:.28,burst:.76,hit:.21,gear:.48,touch:.28,hot:.38,ready:.19,
       warned:.24,incoming:.23,stall:.32,ground:.37,prism:.38,glyph:.32,service:.32};
     const ctx=this.ctx,hz=ctx.sampleRate;
     const buffer=ctx.createBuffer(1,Math.round(hz*durations[name]),hz),out=buffer.getChannelData(0);
     const tau=2*Math.PI,sin=Math.sin,exp=Math.exp;
-    let seed=27183,low=0,mid=0,baseline=0;
-    const bassCut=1-exp(-tau*21/hz);
+    let seed=27183,low=0,mid=0;
     const ping=(u,f,decay)=>u<0?0:sin(tau*f*u)*Math.min(1,u/.003)*exp(-u*decay);
     for(let i=0;i<out.length;i++){
       seed=(Math.imul(seed,1664525)+1013904223)>>>0;
@@ -81,16 +89,6 @@ class FlightAudio {
           const body=sin(tau*(156*u-930*u*u))*exp(-u*92);
           v=(snap+body*.64)*(.86+.12*sin(k*4.4))*Math.min(1,u/.0007)+.11*rumble;
           break;
-        }
-        case 'boom':{
-          // A short N-shaped pressure pulse. Removing its slow component
-          // leaves two sharp fronts and a low thump on ordinary speakers.
-          const gap=.108,rise=.0014;
-          const pressure=t<gap?Math.min(1,t/rise)*(1-2*t/gap):-Math.max(0,1-(t-gap)/rise);
-          baseline+=bassCut*(pressure-baseline);
-          const tail=t-gap;
-          const air=rumble*(.38*exp(-t*18)+(tail>0 ? .30*exp(-tail*10) : 0));
-          v=2*(pressure-baseline)+air;break;
         }
         case 'missile':v=(mid*1.7+hiss*.4+sin(tau*(230*t-160*t*t))*.22)*exp(-t*5);break;
         case 'laser':v=(sin(tau*(980*t-1030*t*t))+.23*sin(tau*1850*t))*exp(-8*t);break;
@@ -166,6 +164,8 @@ class FlightAudio {
   }
   event(e,id,cam){
     if(!this.audible)return;
+    if(e.loss>0 && e.to===id)this.cue('hit',.94,0,.095);
+    if(e.kind==='arcWindup' && e.to===id)this.cue('warned',.67);
     const names={intercept:'burst',hit:'burst',burst:'burst',spark:'hit',missile:'missile',ribbon:'missile',laser:'laser',pulse:'pulse',
       echo:'glyph',chime:'pulse',arc:'prism',arcHop:'hit',flare:'flare',prism:'prism',refract:'prism',bloom:'pulse',glyph:'glyph'};
     const cue=names[e.kind];if(!cue)return;

@@ -53,20 +53,21 @@ assert(Flight.boomMargin([0,700,0],v,obs)<0);
 assert(Flight.boomMargin([0,700,190],v,obs)>0);
 assert.equal(Flight.boomMargin([0,700,190],[0,0,300],obs),null);
 // The exterior clip needs two distinct pressure fronts at either browser rate.
-const Sound=require('node:vm').runInNewContext(require('node:fs').readFileSync(require.resolve('./sound.js'),'utf8')+';FlightAudio');
+const Sound=require('node:vm').runInNewContext(['./boom-sample.js','./sound.js'].map(file=>require('node:fs').readFileSync(require.resolve(file),'utf8')).join('\n')+';FlightAudio',{atob});
 for(const sampleRate of [44100,48000]){
   const sound=new Sound(30);
-  sound.ctx={sampleRate,createBuffer(_channels,length){
-    const mono=new Float32Array(length);return {getChannelData:()=>mono};
+  sound.ctx={sampleRate,createBuffer(_channels,length,rate){
+    const mono=new Float32Array(length);return {sampleRate:rate,getChannelData:()=>mono};
   }};
   const buffer=sound.sample('boom'),samples=buffer.getChannelData(0);
   const level=(start,end)=>{
-    const slice=samples.subarray(Math.round(start*sampleRate),Math.round(end*sampleRate));
+    const slice=samples.subarray(Math.round(start*buffer.sampleRate),Math.round(end*buffer.sampleRate));
     return Math.sqrt(slice.reduce((sum,x)=>sum+x*x,0)/slice.length);
   };
   const gap=level(.045,.085);
-  assert(level(.002,.006)>2*gap && level(.110,.114)>2*gap);
-  assert(level(.43,.60)<.02);
+  assert(level(.015,.030)>2*gap && level(.132,.148)>3*gap);
+  assert(level(.132,.148)>level(.015,.030));
+  assert(level(.30,.46)>.02 && level(.82,.94)<.02);
   assert.equal(sound.sample('boom'),buffer);
 }
 assert(Flight.thermal(-1450,540,610)>5);assert.equal(Flight.thermal(0,540,0),0);

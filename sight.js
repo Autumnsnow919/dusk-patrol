@@ -18,7 +18,9 @@ const Sight=(()=>{
   }
   const trackSlots=3;
   const laser={ring:.16,reach:950,fill:2.2};
+  const arc={ring:.28,reach:360,fill:.9};
+  const reticle=id=>profiles[id] || (id==='laser'?laser:id==='arc'?arc:null);
   const percent=(value,total)=>Math.min(100,Math.floor(100*value/total));
-  return {profiles,laser,ring,reach,fill,inRing,badge,gunRate,gunCapacity,streakSpeed,streakLife,trackSlots,percent};
+  return {profiles,laser,arc,reticle,ring,reach,fill,inRing,badge,gunRate,gunCapacity,streakSpeed,streakLife,trackSlots,percent};
 })();
 if(typeof module!=='undefined')module.exports=Sight;

@@ -14,7 +14,7 @@ const wingHit={hull:.42,local:.78},gearHit={hull:.18,local:1};
 const missileHits={fuselage:{hull:1,local:1},engine:{hull:.62,local:.88},tail:{hull:.54,local:.82},
   leftWing:wingHit,rightWing:wingHit,noseGear:gearHit,leftGear:gearHit,rightGear:gearHit};
 const weapons = {
-  echo:{wait:5,range:155,damage:28},arc:{wait:6,range:440,jump:210,damage:18},
+  echo:{wait:5,range:155,damage:28},arc:{wait:6,range:Sight.arc.reach,jump:110,damage:14,hopDamage:6},
   glyph:{wait:4.2,range:700,radius:115,damage:30},prism:{wait:6.5},
   pulse: {range:290,wait:3.6,damage:23},
   gun: { range: 620, wait: 1/Sight.gunRate, damage: 2 },
@@ -48,7 +48,7 @@ class Arena {
   reset(player) {
     player.marks=new Map();player.focus=null;player.lastFired=null;
     Object.assign(player,{body:spawn(player.slot,player.type,this.mission&&!player.bot),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:Outfit.flares.capacity,
-      tags:new Map(),acquire:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,flareRefillAt:0,divertUntil:0,lastInput:-1});
+      tags:new Map(),acquire:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,arcCast:null,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,flareRefillAt:0,divertUntil:0,lastInput:-1});
   }
   remove(id) {
     this.tracers=this.tracers.filter(t=>t.owner!==id);
@@ -59,6 +59,10 @@ class Arena {
   }
   opponents(a,b) {
     return b && a!==b && (!this.mission || a.bot!==b.bot);
+  }
+  arcEligible(player,peer){
+    return this.opponents(player,peer) && peer.hp>0 && peer.shield<=this.time &&
+      Sight.inRing(player.body,peer.body.pos,Sight.arc.ring,Sight.arc.reach);
   }
   scan(player,spec,dt) {
     const marks=player.marks;
@@ -163,19 +167,22 @@ class Arena {
     if(this.events.length>48) this.events.shift();
     return this.events[this.events.length-1];
   }
-  damage(from,to,amount,part,localWear=amount*.8,impact=null) {
+  damage(from,to,amount,part,localWear=amount*.8,impact=null,weapon=from.weapon) {
     if(to.hp<=0 || to.shield>this.time || (from!==to && !this.opponents(from,to))) return;
     if(from!==to && to.prismUntil>this.time){
       to.prismUntil=0;this.event('refract',from,to);return;
     }
+    const previous=to.hp;
     if(from!==to){
       to.tags.set(from.id,this.time);
       Fields.wear(to.body,'fuselage',amount);
-      const zone=part||Fields.sector(to.body,from.body.pos);
+      const zone=part||Fields.sector(to.body,impact?.a??from.body.pos);
       if(zone!=='fuselage')Fields.wear(to.body,zone,localWear);
-      if(impact)impact.part=zone;
+      impact=impact||this.event('damage',from,to);
+      Object.assign(impact,{part:zone,weapon,life:to.life});
     }
     to.hp=Math.max(0,Math.min(to.hp-amount,to.body.condition.fuselage));
+    if(impact)impact.loss=previous-to.hp;
     if(!to.hp) {
       if(this.players.size>=2)to.deaths++;
       if(from!==to) from.kills++; to.revive=this.time+2.2; to.fire=false; to.laser=0;
@@ -253,7 +260,7 @@ class Arena {
         this.event('chime',player,player,center,center);
         for(const peer of this.players.values()){
           if(this.opponents(player,peer) && peer.hp && distance2(center,peer.body.pos)<=weapons.echo.range**2)
-            hits.push([player,peer,weapons.echo.damage]);
+            hits.push([player,peer,weapons.echo.damage,undefined,undefined,this.event('damage',player,peer,center),'echo']);
         }
         player.echo=null;
       }
@@ -262,11 +269,33 @@ class Arena {
         const peer=this.players.get(mark.id);
         if(peer?.hp && peer.life===mark.life){
           this.event('bloom',player,peer,mark.pos,mark.pos);
-          if(Math.hypot(...peer.body.pos.map((v,i)=>v-mark.pos[i]))<=weapons.glyph.radius)hits.push([player,peer,weapons.glyph.damage]);
+          if(Math.hypot(...peer.body.pos.map((v,i)=>v-mark.pos[i]))<=weapons.glyph.radius)hits.push([player,peer,weapons.glyph.damage,undefined,undefined,this.event('damage',player,peer,mark.pos),'glyph']);
         }
         player.glyph=null;
       }
       const armed=player.hp>0 && player.refitAt<=this.time && player.shield<=this.time;
+      const cast=player.arcCast;
+      if(cast){
+        const target=this.players.get(cast.id);
+        if(!armed || player.weapon!=='arc' || player.target!==cast.id || !this.arcEligible(player,target) || target.life!==cast.life){
+          player.arcCast=null;
+          if(target?.hp && target.life===cast.life)this.event('arcBreak',player,target);
+        }else if(this.time>=cast.until){
+          player.arcCast=null;
+          const arc=weapons.arc;
+          hits.push([player,target,arc.damage,undefined,undefined,this.event('arc',player,target),'arc']);
+          let nearest=null,best=arc.jump**2;
+          for(const peer of this.players.values()){
+            if(peer===target || !this.arcEligible(player,peer))continue;
+            const d=distance2(target.body.pos,peer.body.pos);
+            if(d<=best){nearest=peer;best=d;}
+          }
+          if(nearest){
+            const hop=this.event('arcHop',player,nearest,target.body.pos,nearest.body.pos);
+            hits.push([player,nearest,arc.hopDamage,undefined,undefined,hop,'arc']);
+          }
+        }
+      }
       const inputAge=this.time-player.lastInput;
       const available=armed && inputAge<=.45;
       const missile=Sight.profiles[player.weapon];
@@ -311,16 +340,11 @@ class Arena {
       }
       if(!other?.hp || other===player || other.shield>this.time){player.laser=0;continue;}
       if(player.weapon==='arc'){
-        if(player.arcAt>this.time || distance2(player.body.pos,other.body.pos)>spec.range**2)continue;
-        player.arcAt=this.time+spec.wait;
-        this.event('arc',player,other);hits.push([player,other,spec.damage]);
-        let nearest=null,best=spec.jump**2;
-        for(const peer of this.players.values()){
-          if(!this.opponents(player,peer) || peer===other || !peer.hp || peer.shield>this.time)continue;
-          const d=distance2(other.body.pos,peer.body.pos);
-          if(d<=best){nearest=peer;best=d;}
+        if(player.arcAt<=this.time && this.arcEligible(player,other)){
+          player.arcAt=this.time+spec.wait;
+          player.arcCast={id:other.id,life:other.life,until:this.time+Sight.arc.fill};
+          this.event('arcWindup',player,other);
         }
-        if(nearest){this.event('arcHop',player,nearest,other.body.pos,nearest.body.pos);hits.push([player,nearest,12]);}
         continue;
       }
       if(player.weapon==='glyph'){
@@ -414,10 +438,15 @@ class Arena {
         if(kind==='wall'||!from)continue;
         const p=point||shot.prev.map((v,i)=>v+(shot.pos[i]-v)*at);
         const effect=this.event(kind,from,peer||from,p,p);
+        if(kind==='hit'||kind==='spark'){
+          const direction=shot?shot.axes.f:t.vel;
+          const scale=40/Math.max(.001,Math.hypot(...direction));
+          effect.source=p.map((v,i)=>v-direction[i]*scale);
+        }
         if(kind==='hit'){
           const base=weapons[shot.type].damage,loss=missileHits[part];
-          hits.push([from,peer,base*loss.hull,part,base*loss.local,effect]);
-        }else if(kind==='spark')hits.push([from,peer,weapons.gun.damage,Fields.sector(peer.body,p)]);
+          hits.push([from,peer,base*loss.hull,part,base*loss.local,effect,shot.type]);
+        }else if(kind==='spark')hits.push([from,peer,weapons.gun.damage,Fields.sector(peer.body,p),undefined,effect,'gun']);
       }
       if(spentShots.size)this.shots=this.shots.filter(s=>!spentShots.has(s));
       if(spentRounds.size)this.tracers=this.tracers.filter(t=>!spentRounds.has(t));
@@ -453,8 +482,14 @@ class Arena {
     const births=[];
     for(let i=lo;i<this.tracers.length;i++)births.push(this.tracers[i].spawn);
     const peers=[];
+    let arcThreat=null,laserThreat=null,warned=false;
     for(const other of this.players.values()){
       if(other===player)continue;
+      if(other.hp){
+        if(other.arcCast?.id===player.id && other.arcCast.life===player.life)arcThreat=other.id;
+        if(other.target===player.id && other.laser>0)laserThreat=other.id;
+        if(other.marks.get(player.id)?.life===player.life)warned=true;
+      }
       const peer=summary(other);
       if(!known){peers.push(peer);continue;}
       other.poseRow??=PeerPose.pack(peer);
@@ -468,11 +503,11 @@ class Arena {
         heat:player.heat,hot:player.hot,kit:player.kit,weapon:player.weapon,refit:remain(player.refitAt),
         star:this.rule==='crown'?{id:this.starId,seconds:Math.floor(this.starTime)}:undefined,
         beacon:{site:this.beaconSite(),left:Math.ceil(Lake.relayDuration-this.matchTime%Lake.relayDuration),count:this.zoneCount,hold:player.id===this.holder?Math.floor(this.hold*10)/10:0},
-        lock:player.laser/Sight.laser.fill,shield:remain(player.shield),revive:remain(player.revive),cool:remain(player[player.weapon+'At']),
+        lock:player.arcCast?Math.max(0,1-remain(player.arcCast.until)/Sight.arc.fill):player.laser/Sight.laser.fill,shield:remain(player.shield),revive:remain(player.revive),cool:remain(player[player.weapon+'At']),
         flares:player.flareCells,puffs:player.puffs,dodge:remain(player.puffAt),flareRefill:Math.ceil(remain(player.flareRefillAt)),diverted:player.divertUntil>this.time,acquire:Sight.percent(player.acquire,Sight.profiles[player.weapon]?.fill||1),
-        warned:[...this.players.values()].some(p=>p.hp&&(p.marks.get(player.id)?.life===player.life||(p.target===player.id&&p.laser>0))),
+        arcThreat,laserThreat,warned:warned || !!laserThreat,
         incoming:this.shots.some(shot=>!shot.diverted&&shot.to===player.id&&shot.life===player.life)},
-      shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type]),
+      shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type,+(!s.diverted && s.to===player.id && s.life===player.life)]),
       events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
     if(Sight.profiles[player.weapon])result.tracking={focus:player.focus,marks:[...player.marks].map(([id,mark])=>[id,Sight.percent(mark.time,Sight.profiles[player.weapon].fill)])};
     if(this.mission)result.mission=this.mission.snapshot(this.time,this.players.get(player.target));

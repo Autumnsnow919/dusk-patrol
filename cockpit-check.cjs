@@ -30,14 +30,14 @@ for(const [width,height] of [[500,314],[210,200],[255,430],[660,300],[210,370]])
     for(let i=0;i<mask.length;i++)mask[i]=displayed[i*4+3]===255?1:0;
     const digest=createHash('sha256').update(mask).digest('hex');
     assert(!panels.has(digest),type+' shares its cockpit');panels.add(digest);
-    const basis=Flight.axes([0,0,0,1]),room={combat:true,self:{lock:1},weapon:'missile',target:'p',marks:new Map([['p',100]])};
+    const basis=Flight.axes([0,0,0,1]),room={combat:true,self:{lock:1},weapon:'missile',target:'p',peers:new Map(),marks:new Map([['p',100]])};
     for(const boost of [0,1]){
       const {fov,tanDown}=cockpit.view(boost),focal=height/(2*Math.tan(fov/2));
       const ca=1/Math.hypot(1,tanDown),sa=ca*tanDown;
       const cam={fov,wCockpit:1,B:{r:basis.r,u:[0,ca,-sa],f:[0,-sa,-ca]}};
       const colourAt=(x,y)=>displayed.readUInt32LE((y*width+x)*4)&0xffffff;
       const draw=(weapon,g)=>{room.weapon=weapon;cockpit.draw(1,{...state,g},null,{...env,cam,basis,room});};
-      for(const g of [-1,4])for(const [weapon,profile] of Object.entries({...Sight.profiles,laser:Sight.laser})){
+      for(const g of [-1,4])for(const [weapon,profile] of Object.entries({...Sight.profiles,laser:Sight.laser,arc:Sight.arc})){
         draw(weapon,g);
         const cy=Math.round(height/2-focal*tanDown),cx=Math.round(width/2);
         assert.equal(colourAt(cx-8,cy),0xa6ff8c,type+' nose symbol moved with panel jolt');
