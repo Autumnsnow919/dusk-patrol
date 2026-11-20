@@ -48,7 +48,7 @@ class Arena {
   reset(player) {
     player.marks=new Map();player.focus=null;player.lastFired=null;
     Object.assign(player,{body:spawn(player.slot,player.type,this.mission&&!player.bot),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:Outfit.flares.capacity,
-      tags:new Map(),acquire:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
+      tags:new Map(),acquire:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,flareRefillAt:0,divertUntil:0,lastInput:-1});
   }
   remove(id) {
     this.tracers=this.tracers.filter(t=>t.owner!==id);
@@ -139,14 +139,14 @@ class Arena {
     // immediately without awarding a second slice of capture time.
     if(selectionChanged && equipped && Sight.profiles[player.weapon] && player.refitAt<=this.time && player.shield<=this.time)
       this.scan(player,Sight.profiles[player.weapon],0);
-    if(data.dodge===true && this.time>=player.dodgeAt && !player.puffs && player.flareCells){
+    if(data.dodge===true && this.time>=player.puffAt && !player.puffs && player.flareCells){
       player.puffs=Math.min(Outfit.flares.burst,player.flareCells);
-      player.dodgeAt=this.time+Outfit.flares.cooldown;
       this.dispense(player);
     }
     return true;
   }
   dispense(player){
+    if(!player.flareRefillAt)player.flareRefillAt=this.time+Outfit.flares.refill;
     const b=player.body,{r,f,u}=b.basis;
     player.flareCells--;player.puffs--;player.puffAt=this.time+Outfit.flares.interval;
     const side=player.flareCells%2?1:-1;
@@ -239,6 +239,10 @@ class Arena {
     }
     const hits=[];
     for(const player of this.players.values()) {
+      if(player.hp && player.flareRefillAt && this.time>=player.flareRefillAt){
+        player.flareCells++;
+        player.flareRefillAt=player.flareCells<Outfit.flares.capacity?player.flareRefillAt+Outfit.flares.refill:0;
+      }
       if(player.hp && player.puffs && player.puffAt<=this.time)this.dispense(player);
       if(player.hot || this.time-player.lastGun>.28)player.heat=Math.max(0,player.heat-dt*.32);
       if(player.hot && player.heat<=.2)player.hot=false;
@@ -465,7 +469,7 @@ class Arena {
         star:this.rule==='crown'?{id:this.starId,seconds:Math.floor(this.starTime)}:undefined,
         beacon:{site:this.beaconSite(),left:Math.ceil(Lake.relayDuration-this.matchTime%Lake.relayDuration),count:this.zoneCount,hold:player.id===this.holder?Math.floor(this.hold*10)/10:0},
         lock:player.laser/Sight.laser.fill,shield:remain(player.shield),revive:remain(player.revive),cool:remain(player[player.weapon+'At']),
-        flares:player.flareCells,puffs:player.puffs,dodge:remain(player.dodgeAt),diverted:player.divertUntil>this.time,acquire:Sight.percent(player.acquire,Sight.profiles[player.weapon]?.fill||1),
+        flares:player.flareCells,puffs:player.puffs,dodge:remain(player.puffAt),flareRefill:Math.ceil(remain(player.flareRefillAt)),diverted:player.divertUntil>this.time,acquire:Sight.percent(player.acquire,Sight.profiles[player.weapon]?.fill||1),
         warned:[...this.players.values()].some(p=>p.hp&&(p.marks.get(player.id)?.life===player.life||(p.target===player.id&&p.laser>0))),
         incoming:this.shots.some(shot=>!shot.diverted&&shot.to===player.id&&shot.life===player.life)},
       shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type]),

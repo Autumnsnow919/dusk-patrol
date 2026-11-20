@@ -1224,13 +1224,14 @@ const PLANE = {
       parts.pos[k] += parts.vel[k] * dt; parts.pos[k + 1] += parts.vel[k + 1] * dt; parts.pos[k + 2] += parts.vel[k + 2] * dt;
     }
 
+    updateCamera(dt, B);
     if(flying && body.mach>=1 && !body.supersonic){
       body.supersonic=true;
       const spec=Flight.fleet[body.type];
-      if(!orbit.anchor && !watchId)audio.cue('transonic',.8*spec.boomLevel,0,3,spec.boomRate);
+      if(S.viewT===1 && (S.view===0 || S.view===1) && room.self?.hp!==0)
+        audio.cue('boom',.88*spec.boomLevel,0,2,spec.boomRate);
       notice='M 1.00 · 突破音速　I 前方通场机位';noticeUntil=performance.now()+3000;
     }else if(body.mach<.98)body.supersonic=false;
-    updateCamera(dt, B);
     if(flying)observeWaves();
   }
 
@@ -1891,12 +1892,13 @@ const PLANE = {
           notice='激波掠过 · 音爆';noticeUntil=performance.now()+1700;
           const [,pan]=audio.position(pos,cam);
           const spec=Flight.fleet[type];
-          audio.cue('boom',1.35*spec.boomLevel/(1+distance/620),pan,0,spec.boomRate);
+          const inside=cam.wCockpit>.5;
+          audio.cue(inside?'cabinBoom':'boom',(inside ? .58 : 1.35)*spec.boomLevel/(1+distance/620),pan,0,spec.boomRate);
         }
       }
       if(old){old.margin=margin;old.life=life;}else waveHistory.set(id,{margin,life,at:-10});
     }
-    if(cam.wCockpit<.01)check('self',body.type,body.pos,body.vel,room.self?.life);
+    if(S.view===3 && room.self?.hp!==0)check('self',body.type,body.pos,body.vel,room.self?.life);
     for(const peer of room.peers.values())if(peer.vel && peer.hp!==0)check(peer.id,peer.type,peer.displayPos,peer.vel,peer.life);
     for(const id of waveHistory.keys())if(id!=='self'&&!room.peers.has(id))waveHistory.delete(id);
   }
@@ -1913,7 +1915,7 @@ const PLANE = {
     update(dt); render();
     if(flying) {
       frameMs+=.06*(clamp(raw*1000,1,250)-frameMs);
-      room.sync(body,now,wireControls,keys.has('KeyJ'));showReadout(now);audio.update(body,S,cam,room,keys.has('KeyZ'),keys.has('KeyJ')&&room.weapon==='gun');
+      room.sync(body,now,wireControls,keys.has('KeyJ'),keys.has('KeyX'));showReadout(now);audio.update(body,S,cam,room,keys.has('KeyZ'),keys.has('KeyJ')&&room.weapon==='gun');
       if(onlineSortie&&!room.token){park();$('launch-note').textContent='房间连接已过期，请重新加入。';}
       else scope.draw(now,room,body,cam,Lake.sites[chart.selected]);
     }

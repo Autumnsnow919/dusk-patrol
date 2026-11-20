@@ -28,6 +28,9 @@ class FlightAudio {
     };
     this.engine=band('lowpass',530);this.wind=band('bandpass',1900);
     this.wheels=band('bandpass',155);
+    this.buffet=band('lowpass',190);
+    this.cabin=ctx.createBiquadFilter();this.cabin.type='lowpass';this.cabin.frequency.value=620;
+    this.cabin.Q.value=.65;this.cabin.connect(this.bus);
     this.whine=ctx.createOscillator();this.whineGain=ctx.createGain();this.whineGain.gain.value=0;
     this.whine.connect(this.whineGain);this.whineGain.connect(this.bus);this.whine.start();noise.start();
   }
@@ -55,13 +58,14 @@ class FlightAudio {
   // repeated cannon waveform contains twelve different transients per loop.
   sample(name){
     if(this.bank.has(name))return this.bank.get(name);
-    const durations={air:1,gun:12/this.rate,boom:.86,transonic:.60,missile:.55,laser:.36,
+    const durations={air:1,gun:12/this.rate,boom:.65,missile:.55,laser:.36,
       pulse:.47,flare:.28,burst:.76,hit:.21,gear:.48,touch:.28,hot:.38,ready:.19,
       warned:.24,incoming:.23,stall:.32,ground:.37,prism:.38,glyph:.32,service:.32};
     const ctx=this.ctx,hz=ctx.sampleRate;
     const buffer=ctx.createBuffer(1,Math.round(hz*durations[name]),hz),out=buffer.getChannelData(0);
     const tau=2*Math.PI,sin=Math.sin,exp=Math.exp;
-    let seed=27183,low=0,mid=0;
+    let seed=27183,low=0,mid=0,baseline=0;
+    const bassCut=1-exp(-tau*21/hz);
     const ping=(u,f,decay)=>u<0?0:sin(tau*f*u)*Math.min(1,u/.003)*exp(-u*decay);
     for(let i=0;i<out.length;i++){
       seed=(Math.imul(seed,1664525)+1013904223)>>>0;
@@ -79,10 +83,15 @@ class FlightAudio {
           break;
         }
         case 'boom':{
-          const crack=u=>u<0?0:(rumble*1.2+mid*.55)*exp(-u*17)+ping(u,54,21)*.78;
-          v=crack(t)+crack(t-.095)*.79+rumble*.35*exp(-t*3.8);break;
+          // A short N-shaped pressure pulse. Removing its slow component
+          // leaves two sharp fronts and a low thump on ordinary speakers.
+          const gap=.108,rise=.0014;
+          const pressure=t<gap?Math.min(1,t/rise)*(1-2*t/gap):-Math.max(0,1-(t-gap)/rise);
+          baseline+=bassCut*(pressure-baseline);
+          const tail=t-gap;
+          const air=rumble*(.38*exp(-t*18)+(tail>0 ? .30*exp(-tail*10) : 0));
+          v=2*(pressure-baseline)+air;break;
         }
-        case 'transonic':v=(rumble+.4*sin(tau*(58*t-21*t*t)))*sin(Math.PI*T)**2*(.7+.3*sin(t*85));break;
         case 'missile':v=(mid*1.7+hiss*.4+sin(tau*(230*t-160*t*t))*.22)*exp(-t*5);break;
         case 'laser':v=(sin(tau*(980*t-1030*t*t))+.23*sin(tau*1850*t))*exp(-8*t);break;
         case 'pulse':v=(sin(tau*(220*t-175*t*t))+rumble*.46)*exp(-t*7);break;
@@ -109,9 +118,10 @@ class FlightAudio {
   voice(name,volume,pan=0,loop=false,rate=1){
     const c=this.ctx,node=c.createBufferSource(),gain=c.createGain();
     const stereo=c.createStereoPanner?c.createStereoPanner():null;
-    node.buffer=this.sample(name);node.loop=loop;node.playbackRate.value=rate;node.connect(gain);gain.gain.value=volume;
-    if(stereo){stereo.pan.value=pan;gain.connect(stereo);stereo.connect(this.bus);}
-    else gain.connect(this.bus);
+    node.buffer=this.sample(name==='cabinBoom'?'boom':name);node.loop=loop;node.playbackRate.value=rate;node.connect(gain);gain.gain.value=volume;
+    const bus=name==='cabinBoom'?this.cabin:this.bus;
+    if(stereo){stereo.pan.value=pan;gain.connect(stereo);stereo.connect(bus);}
+    else gain.connect(bus);
     this.voices.add(node);
     node.onended=()=>{this.voices.delete(node);node.disconnect();gain.disconnect();stereo?.disconnect();};
     node.start();return {node,gain,stereo};
@@ -175,6 +185,8 @@ class FlightAudio {
     set(this.whine.frequency,prop?64+48*thrust:640+710*thrust);
     set(this.whineGain.gain,alive?(prop ? .065 : .013)+thrust*.020:0);
     set(this.wind.gain.gain,alive?Math.min(.22,S.speed/1750)*(1-.45*cam.wCockpit):0);
+    const transonic=Math.max(0,1-Math.abs(body.mach-1)/.065);
+    set(this.buffet.gain.gain,alive ? .85*cam.wCockpit*transonic*transonic : 0);
     set(this.wheels.gain.gain,body.grounded?Math.min(.8,S.speed/85)*(brake ? .85 : .4):0);
     if(continuous && alive){
       if(body.touchdowns>prev.touch)this.cue('touch',Math.min(1,.30+(body.sinkAtTouch||0)*.09));

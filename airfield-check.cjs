@@ -52,6 +52,23 @@ const obs=[30,700,100],v=[0,0,400];
 assert(Flight.boomMargin([0,700,0],v,obs)<0);
 assert(Flight.boomMargin([0,700,190],v,obs)>0);
 assert.equal(Flight.boomMargin([0,700,190],[0,0,300],obs),null);
+// The exterior clip needs two distinct pressure fronts at either browser rate.
+const Sound=require('node:vm').runInNewContext(require('node:fs').readFileSync(require.resolve('./sound.js'),'utf8')+';FlightAudio');
+for(const sampleRate of [44100,48000]){
+  const sound=new Sound(30);
+  sound.ctx={sampleRate,createBuffer(_channels,length){
+    const mono=new Float32Array(length);return {getChannelData:()=>mono};
+  }};
+  const buffer=sound.sample('boom'),samples=buffer.getChannelData(0);
+  const level=(start,end)=>{
+    const slice=samples.subarray(Math.round(start*sampleRate),Math.round(end*sampleRate));
+    return Math.sqrt(slice.reduce((sum,x)=>sum+x*x,0)/slice.length);
+  };
+  const gap=level(.045,.085);
+  assert(level(.002,.006)>2*gap && level(.110,.114)>2*gap);
+  assert(level(.43,.60)<.02);
+  assert.equal(sound.sample('boom'),buffer);
+}
 assert(Flight.thermal(-1450,540,610)>5);assert.equal(Flight.thermal(0,540,0),0);
 const arena=new Arena(0),p=arena.add('p','kite'),q=arena.add('q','sail');
 p.shield=q.shield=0;p.body=Flight.approach('kite',field);

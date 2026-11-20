@@ -1,12 +1,10 @@
 class FlightRoom {
   get combat() { return this.mode==='pvp'||this.mode==='pve'; }
   flareReadout(incoming=false) {
-    const {flares,puffs,dodge}=this.self;
-    let state=incoming?'可按 X 释放':'就绪';
-    if(!flares)state='已耗尽';
-    else if(puffs)state='连放中';
-    else if(dodge>0)state='冷却 '+(Math.ceil(dodge*10)/10).toFixed(1)+' s';
-    return incoming?'来袭 · 热诱弹'+state:'热诱弹 '+flares+'/'+Outfit.flares.capacity+' · '+state;
+    const {flares,puffs,flareRefill}=this.self;
+    if(incoming)return !flares?'来袭 · 热诱弹已耗尽':puffs?'来袭 · 热诱弹连放中':'来袭 · X 热诱弹';
+    const next=flareRefill?' · '+flareRefill+' 秒后补 1 枚':'';
+    return '热诱弹 '+flares+'/'+Outfit.flares.capacity+' · '+(!flares?'已耗尽':puffs?'连放中':'就绪')+next;
   }
   hostile(peer) { return this.mode==='pvp'||(this.mode==='pve'&&peer.id.startsWith('ai-')); }
   constructor() {
@@ -55,7 +53,7 @@ class FlightRoom {
     this.kit=kit;this.weapon=Outfit.first(kit);
     this.token=reply.token; this.id=reply.id;this.name=reply.name;this.mode=mode;this.rule=rule;this.code=reply.room??room; this.status=this.code+' · 1/8'; this.nextSync=0; return reply;
   }
-  async sync(body,now,controls,fire) {
+  async sync(body,now,controls,fire,holdFlares=false) {
     if(!this.token || this.busy || now<this.nextSync) return;
     const version=this.generation;
     const duel=this.combat;
@@ -64,7 +62,7 @@ class FlightRoom {
       if(duel && typeof controls==='function')controls=controls();
       const launch=this.triggerTap?.target && now-this.triggerTap.at<=450?this.triggerTap:null;
       const tapped=this.triggerTap===true;
-      const command=duel?{controls,compactSelf:true,weapon:this.weapon,target:launch?.target??this.target,fire:Sight.profiles[this.weapon]?!!launch:fire||tapped,fireLife:launch?.life,tap:tapped,dodge:this.dodge,after:this.after,seenTracer:this.seenTracer,known:[...this.peers.keys()]}:{pos:body.pos,quat:body.quat,vel:body.vel,condition:body.damaged?body.condition:undefined,rig:Flight.rig(body).map(v=>Math.round(v*100)/100)};
+      const command=duel?{controls,compactSelf:true,weapon:this.weapon,target:launch?.target??this.target,fire:Sight.profiles[this.weapon]?!!launch:fire||tapped,fireLife:launch?.life,tap:tapped,dodge:this.dodge||holdFlares,after:this.after,seenTracer:this.seenTracer,known:[...this.peers.keys()]}:{pos:body.pos,quat:body.quat,vel:body.vel,condition:body.damaged?body.condition:undefined,rig:Flight.rig(body).map(v=>Math.round(v*100)/100)};
       if(duel && this.pendingKit!==null)command.kit=this.pendingKit;
       if(duel && Sight.profiles[this.weapon])command.autoFocus=!this.manualTarget && !launch;
       this.triggerTap=false;this.dodge=false;

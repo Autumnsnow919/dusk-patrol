@@ -53,23 +53,47 @@ assert.equal(packets.length,3);assert.equal(b.flareCells,9);
 assert(packets[0].at<packets[1].at && packets[1].at<packets[2].at);
 assert.notDeepEqual(packets[0].a,packets[2].a);
 const sortie=b.life;
-// Repeated requests, including a loadout change, cannot refill the dispenser.
-for(let i=0;i<72/Flight.tick;i++){
+// Hold the control after the first tap, including across a loadout change.
+for(let i=0;i<5/Flight.tick;i++){
   room.input(b,{weapon:'gun',kit:1,controls:idle,dodge:true});
   room.tick(Flight.tick);
 }
 assert.equal(b.life,sortie);
 const releases=room.events.filter(e=>e.kind==='flare');
 assert.equal(releases.length,12);
-for(let i=3;i<12;i+=3)assert(releases[i].at-releases[i-3].at>=8);
+assert(releases.at(-1).at-releases[0].at<3.3);
+for(let i=1;i<12;i++)assert(releases[i].at-releases[i-1].at>=.24-1e-8);
 const empty=room.snapshot(b,0).self;
 assert.equal(empty.flares,0);assert.equal(empty.puffs,0);assert.equal(empty.dodge,0);
+const deadline=releases[0].at+60;
+function before(deadline){while(room.time+Flight.tick<deadline)room.tick(Flight.tick);}
+before(deadline);
+assert.equal(b.flareCells,0);
+room.tick(Flight.tick);assert.equal(b.flareCells,1);
+// Spending the newly recovered single item must not reset the ongoing clock.
+for(let i=0;i<240;i++)room.tick(Flight.tick);
+room.input(b,{weapon:'gun',controls:idle,dodge:true});assert.equal(b.flareCells,0);assert.equal(b.puffs,0);
+before(deadline+60);assert.equal(b.flareCells,0);
+room.tick(Flight.tick);assert.equal(b.flareCells,1);assert.equal(b.life,sortie);
+// The clock stops at capacity and the next draw starts a fresh minute.
+{
+  const game=new Arena(0),pilot=game.add('test','tern');
+  game.input(pilot,{controls:idle,weapon:'gun',dodge:true});
+  for(let i=0;i<70;i++)game.tick(Flight.tick);
+  for(const [minute,expected] of [[1,10],[2,11],[3,12],[4,12]]){
+    game.time=minute*60-Flight.tick;
+    game.tick(Flight.tick);assert.equal(pilot.flareCells,expected);
+  }
+  assert.equal(game.snapshot(pilot,0).self.flareRefill,0);
+  game.input(pilot,{controls:idle,weapon:'gun',dodge:true});
+  assert.equal(game.snapshot(pilot,0).self.flareRefill,60);
+}
 
-// Two ordinary launches against a level player. The first burst must leave a
-// window for the next incoming marker even if the defender keeps pressing X.
+// A level player spending their last burst still faces the next launch.
 {
   const game=new Arena(0),sender=game.add('sender','tern'),receiver=game.add('receiver','tern');
   sender.shield=receiver.shield=0;
+  receiver.flareCells=3;
   sender.body=Flight.create('tern',[900,1450,1500],0);
   receiver.body=Flight.create('tern',[900,1450,1100],0);
   let cleared=false,followup=false,impact=false;
@@ -84,8 +108,8 @@ assert.equal(empty.flares,0);assert.equal(empty.puffs,0);assert.equal(empty.dodg
     }
     impact=game.events.some(e=>e.kind==='hit' && e.to===receiver.id);
   }
-  assert(cleared && followup && impact,'the follow-up should reach the level player during cooldown');
-  assert.equal(receiver.flareCells,9);
+  assert(cleared && followup && impact,'the follow-up should reach the player with an empty dispenser');
+  assert.equal(receiver.flareCells,0);
 }
 
 function movementPass(input,briefRoll=false,weapon='missile'){
@@ -404,7 +428,7 @@ async function checkBufferedLaunch(){
   await client.sync(null,now+140,idle,true);
   assert.equal(game.shots.length,1,'holding the key cannot launch at a different contact');
   client.self=empty;
-  assert.equal(client.flareReadout(),'热诱弹 0/12 · 已耗尽');
+  assert.equal(client.flareReadout(),'热诱弹 0/12 · 已耗尽 · '+empty.flareRefill+' 秒后补 1 枚');
   assert.equal(client.flareReadout(true),'来袭 · 热诱弹已耗尽');
 }
 network().then(()=>console.log('PASS ring and range, continuous capture, warnings, moving shot, maneuver miss, decoy, assists and distinct names in both rooms')).catch(e=>{console.error(e);process.exitCode=1;});

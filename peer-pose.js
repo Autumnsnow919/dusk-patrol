@@ -7,12 +7,13 @@ const selfFields=[
 ];
 const PeerPose={
   // Each reply stands alone. Packet loss and respawn need no baseline or repair delta.
-  packSelf(p){return [...selfFields.map(key=>p[key]),p.damaged?p.condition:null,p.star??null];},
+  packSelf(p){return [...selfFields.map(key=>p[key]),p.damaged?p.condition:null,p.star??null,p.flareRefill];},
   unpackSelf(row,freshCondition){
     const p={};
     for(let i=0;i<selfFields.length;i++)p[selfFields[i]]=row[i];
     p.condition=row[selfFields.length]??freshCondition();
     if(row[selfFields.length+1])p.star=row[selfFields.length+1];
+    p.flareRefill=row[selfFields.length+2]??0;
     return p;
   },
   pack(p){return [p.id,p.pos,p.quat,p.vel,p.rig,p.hp,p.life,p.kills,p.deaths,p.assists,p.beacons,p.gunCount,+p.gunning,p.condition];},

@@ -147,8 +147,8 @@ function exerciseWarning(){
   const followup=require('./bolts.cjs').launch(2,pilot,drone,'ribbon');
   game.shots.push(followup);
   run(1.8);
-  assert(!followup.diverted);assert.equal(drone.flareCells,9);
-  assert(game.snapshot(drone,0).self.dodge>0);
+  assert(followup.diverted);assert.equal(drone.flareCells,6);
+  assert(game.snapshot(drone,0).self.flareRefill>55);
 }
 exerciseWarning();
 
