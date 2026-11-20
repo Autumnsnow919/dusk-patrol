@@ -69,7 +69,7 @@ function createServer() {
         const pilot={name,room,type:data.type,id,seen:Date.now(),pose:null,group};
         group.arena?.advance(performance.now()); const fighter=group.arena?.add(id,data.type,name);
         rooms.set(room,group); group.members.add(pilot); sessions.set(token,pilot);
-        return reply(200,{token,id,name,room,mode,rule,type:data.type,protocol:12,slot:fighter?.slot??others.length,lead:others.find(peer=>peer.pose)?.pose,
+        return reply(200,{token,id,name,room,mode,rule,type:data.type,protocol:13,slot:fighter?.slot??others.length,lead:others.find(peer=>peer.pose)?.pose,
           spawn:fighter?.body.pos,heading:fighter?spawnHeading(fighter.slot,mode==='pve'):undefined});
       }
       const token = req.headers.authorization?.replace(/^Bearer /,''), pilot = sessions.get(token);

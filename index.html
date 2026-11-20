@@ -422,7 +422,7 @@ void main(){
   o=vec4(floor(d/65536.),mod(floor(d/256.),256.),mod(d,256.),255.)/255.;
 }`;
 const VS_MESH = `#version 300 es
-in vec3 aPos; in vec3 aNor; in vec4 aCol;
+in vec3 aPos; in vec3 aNor; in vec4 aCol; in float aZone;
 uniform mat4 uVP; uniform mat4 uModel;
 out vec3 vWorld; out vec3 vN; out vec3 vCol; out float vMat; out vec3 vLocal;
 uniform vec4 uControls; // elevator, rudder, ailerons, wheel extension
@@ -488,8 +488,9 @@ void main(){
       vMat=5.;vCol=vec3(uPower.w);
     }
   }
-  if(part>=0. && part!=14.){
-    float health=part==6.||part==7.?uWear.w:abs(aPos.x)>2.1?(aPos.x<0.?uWear.y:uWear.z):part==11.||part==12.||part==13.?uGearWear.w:uWear.x;
+  if(aZone>0.){
+    int idx=int(aZone)-1;
+    float health=idx<4?uWear[idx]:uGearWear[idx-4];
     vCol=mix(vCol,vec3(.27,.20,.19),.75*(1.-health));
   }
   vec4 world=uModel*vec4(p,1.);vWorld=world.xyz;gl_Position=uVP*world;vN=mat3(uModel)*n;
@@ -1113,7 +1114,7 @@ window.Cockpit = Cockpit;
       surface:program(VS_SURFACE,FS_SURFACE,['aPos']),
       scene: program(VS_QUAD, FS_SCENE, ['aP']),
       cast: program(VS_MESH, FS_CAST, ['aPos','aNor','aCol']),
-      mesh: program(VS_MESH, FS_MESH, ['aPos', 'aNor', 'aCol']),
+      mesh: program(VS_MESH, FS_MESH, ['aPos', 'aNor', 'aCol','aZone']),
       trail: program(VS_TRAIL, FS_TRAIL, ['aA', 'aB', 'aS']),
       streak: program(VS_STREAK, FS_STREAK, ['aOrigin','aVelocity','aAge']),
       part: program(VS_PART, FS_PART, ['aPos', 'aData']),
@@ -1134,9 +1135,19 @@ window.Cockpit = Cockpit;
   const meshes = new Map();
   function meshFor(type) {
     if(meshes.has(type))return meshes.get(type);
-    const shape = buildPlane(type), buffer = gl.createBuffer();
+    const parts=Flight.fleet[type]?[]:null;
+    const shape = buildPlane(type,null,parts), buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, shape.data, gl.STATIC_DRAW);
     const mesh={vao:vao(buffer,[3,3,4],10),count:shape.solidEnd,withMist:shape.data.length/10,pivots:shape.pivots,axes:shape.axes};
+    if(parts){
+      const zones=new Uint8Array(parts.length*3);
+      for(let i=0;i<parts.length;i++)zones.fill(parts[i],3*i,3*i+3);
+      gl.bindVertexArray(mesh.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());
+      gl.bufferData(gl.ARRAY_BUFFER,zones,gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(3);gl.vertexAttribPointer(3,1,gl.UNSIGNED_BYTE,false,0,0);
+      gl.bindVertexArray(null);
+    }
     meshes.set(type,mesh);return mesh;
   }
   const lakeBuffer=gl.createBuffer(),lakeData=Lake.vertices();
@@ -1276,6 +1287,7 @@ window.Cockpit = Cockpit;
     time: 0, cloudOff: [0, 0], agl: 500, ground: 0, vs: 0, g: 1, skim: 0,
   };
   let body = Flight.create('tern'), chaseQuat = body.quat.slice(), accumulator = 0, flying = false, notice = '', noticeUntil = 0;
+  let impactText='',impactUntil=0;
   const room = new FlightRoom(), keys = new Set(), scope=new DuelScope($('scope'));
   const chart=new LakeChart($('map-paper')),outfit=new OutfitPanel($('outfit'));
   const trial={next:0,time:0,best:new Map(),course:Lake.courses[0]}, prior=[0,0,0];
@@ -1339,6 +1351,7 @@ window.Cockpit = Cockpit;
   const axisKey = (plus,minus) => Number(keys.has(plus))-Number(keys.has(minus));
   const tipFor = () => Flight.fleet[body.type].tip;
   function resetFlight(type, pos, yaw) {
+    impactUntil=0;
     trial.next=0;trial.time=0;lastCondition='';damageUntil=0;body = Flight.create(type,pos,yaw); S.pos=body.pos;gearRequest=body.gearDown;waveHistory.clear();
     accumulator=0; chaseQuat=body.quat.slice();
     for(const trail of trails) {trail.n=0;trail.head=0;trail.acc=0;}
@@ -1357,6 +1370,11 @@ window.Cockpit = Cockpit;
   const flareFans=[];
   room.onEffect=event=>{
     audio.event(event,room.id,cam);
+    if(event.kind==='hit' && event.part && (event.from===room.id || event.to===room.id)){
+      impactText=event.to===room.id?'本机'+Airfields.labels[event.part]+'中弹':
+        '命中 '+(room.peers.get(event.to)?.name??'对手')+' · '+Airfields.labels[event.part];
+      impactUntil=performance.now()+2500;
+    }
     if(event.kind==='intercept' && event.from===room.id){notice='机炮拦截成功';noticeUntil=performance.now()+1600;}
     if(event.kind==='flare'){
       if(flareFans.length===32)flareFans.shift();
@@ -1474,6 +1492,7 @@ window.Cockpit = Cockpit;
 
     // wing-tip vapour, and the furrow the jet wash cuts in the water
     const tipsOn = !body.grounded && S.speed>32;
+    const singleEngine=Flight.fleet[body.type].singleEngine;
     for (let k = 0; k < TRAIL_COUNT; k++) {
       const T = trails[k], sgn = k % 2 ? -1 : 1;
       T.acc += dt;
@@ -1481,7 +1500,7 @@ window.Cockpit = Cockpit;
         T.acc = 0;
         let p, on;
         if (k < 2) { p = toWorld(B, [tipFor()[0] * sgn, tipFor()[1], tipFor()[2]]); on = tipsOn; }
-        else { p = toWorld(B, [PLANE.WAKE[0] * sgn, PLANE.WAKE[1], PLANE.WAKE[2]]); p[1] = 0.35; on = S.skim; }
+        else { p = toWorld(B, [singleEngine?0:PLANE.WAKE[0] * sgn, PLANE.WAKE[1], PLANE.WAKE[2]]); p[1] = 0.35; on = S.skim && (!singleEngine || k===2); }
         const i = T.head * 5; T.pts[i] = p[0]; T.pts[i + 1] = p[1]; T.pts[i + 2] = p[2]; T.pts[i + 3] = S.time; T.pts[i + 4] = on;
         T.head = (T.head + 1) % TRAIL_N; T.n = Math.min(TRAIL_N, T.n + 1);
       }
@@ -1493,7 +1512,7 @@ window.Cockpit = Cockpit;
       while (parts.acc >= 1) {
         parts.acc -= 1;
         const sgn = Math.random() < 0.5 ? -1 : 1;
-        const p = toWorld(B, [PLANE.NOZZLE[0] * sgn, PLANE.NOZZLE[1], PLANE.NOZZLE[2] - 9 - Math.random() * 5]);
+        const p = toWorld(B, [singleEngine?0:PLANE.NOZZLE[0] * sgn, PLANE.NOZZLE[1], PLANE.NOZZLE[2] - 9 - Math.random() * 5]);
         const j = () => (Math.random() - 0.5) * 11;
         spawn(p, add(mul(vel, 0.42), [j(), j() + 3, j()]), 0.9 + Math.random() * 1.0, 1.3 + Math.random() * 1.1, 0);
       }
@@ -2097,6 +2116,7 @@ window.Cockpit = Cockpit;
     }
     if(room.combat && self){
       $('wingmen').textContent='战绩 '+self.kills+' / '+self.deaths+'　助攻 '+self.assists+'　HP '+self.hp+'　目标 '+(room.peers.get(room.target)?.name??'无');
+      if(now<impactUntil)$('wingmen').textContent+='　'+impactText;
       const tracked=room.peers.get(room.target);
       const distance=tracked?Math.hypot(...tracked.pos.map((v,i)=>v-S.pos[i])):Infinity;
       const missile=Sight.profiles[room.weapon];

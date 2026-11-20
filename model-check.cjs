@@ -110,8 +110,16 @@ const poses=[
 ];
 let count=0;
 for(const type of Object.keys(Flight.fleet)){
-  const all=[],mesh=buildPlane(type,all),cells=all.filter(c=>![12,13,14].includes(c.mat));
+  const all=[],parts=[],mesh=buildPlane(type,all,parts),cells=all.filter(c=>![12,13,14].includes(c.mat));
   assert(mesh.data.every(Number.isFinite));
+  assert.equal(parts.length*30,mesh.data.length);
+  for(let i=1;i<=8;i++)assert.equal(parts.includes(i),!(type==='nocturne'&&i===4),type+' damage zone '+i);
+  if(['su27','j10','j20','j16'].includes(type)){
+    assert.equal(cells.filter(c=>c.component==='nozzle' && c.mat===11).length,type==='j10'?1:2);
+    assert.equal(cells.some(c=>c.component==='foreplane'),['j10','j20'].includes(type));
+    assert.equal(cells.some(c=>c.component==='tail fairing'),['su27','j16'].includes(type));
+    assert.equal(cells.some(c=>c.component==='canopy' && c.mat===0),type==='j16');
+  }
   const cloud=all.filter(c=>c.mat===14);
   if(type==='rv8a'||type==='sail')assert.equal(cloud.length,0);
   else{

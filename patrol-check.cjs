@@ -157,6 +157,45 @@ function crossing(offset,defend,bystander=false,weapon='missile'){
   return {events:game.events,pilot,game};
 }
 const direct=crossing(0,false),miss=crossing(22,false),intercept=crossing(0,true),third=crossing(0,false,true);
+// Pixel-model fixtures on the fictional Tern. Each vertical pass spans a
+// whole tick, including target motion, resolution, scoring and the wire event.
+function hitZone(x,z,weapon,shield=false,cooperative=false,bank=0){
+  const game=new Arena(0,cooperative?'waves':'beacon'),caster=game.add('caster','tern');
+  if(cooperative)game.tick(Flight.tick);
+  const pilot=cooperative?game.mission.drones[0]:game.add('target','tern');
+  pilot.body=Flight.create('tern',[5000,1200,5000],0);pilot.shield=0;
+  pilot.body.quat=[0,0,Math.sin(bank/2),Math.cos(bank/2)];
+  pilot.body.basis=Flight.axes(pilot.body.quat);
+  pilot.body.gear=1;pilot.body.gearDown=true;
+  if(shield)pilot.prismUntil=game.time+1;
+  const {r,u,f}=pilot.body.basis;
+  const point=y=>pilot.body.pos.map((v,i)=>v+x*r[i]+y*u[i]-z*f[i]);
+  const start=point(-40),end=point(40);
+  const shot=Bolts.launch(1,caster,pilot,weapon);
+  Object.assign(shot,{stage:2,pos:start.slice(),start,end,elapsed:0,duration:Flight.tick,arch:0});
+  game.shots.push(shot);game.tick(Flight.tick);
+  const state=game.snapshot(pilot,0);
+  assert.equal(game.shots.length,0);
+  return {pilot,hit:state.events.find(e=>e.kind==='hit'),caster,state};
+}
+for(const weapon of ['missile','ribbon']){
+  for(const [part,x,z,hull,local] of [
+    ['fuselage',0,-10,100,100],['leftWing',-10,0,42,78],['rightWing',10,0,42,78],
+    ['tail',-5,11,54,82],['engine',-3,7,62,88],['leftGear',-2,1,18,100],
+    ['rightGear',2,1,18,100],['noseGear',0,-4,18,100]
+  ]){
+    const {pilot,hit,caster,state}=hitZone(x,z,weapon,false,weapon==='ribbon');
+    assert.equal(hit?.part,part,weapon+' '+part);
+    assert.equal(state.self.hp,100-hull);assert.equal(caster.kills,Number(hull===100));
+    for(const [id,value] of Object.entries(pilot.body.condition))
+      assert.equal(value,100-(id==='fuselage'?hull:id===part?local:0),part+' affects '+id);
+  }
+}
+const blockedWing=hitZone(-10,0,'missile',true);
+const banked=hitZone(-10,0,'ribbon',false,false,Math.PI*.65);
+assert.equal(banked.hit.part,'leftWing');assert.equal(banked.pilot.body.condition.rightWing,100);
+assert.equal(blockedWing.pilot.hp,100);assert.equal(blockedWing.hit.part,undefined);
+assert(blockedWing.state.events.some(e=>e.kind==='refract'));
 assert.equal(direct.pilot.hp,0);assert.equal(direct.game.players.get('caster').kills,1);assert.equal(miss.pilot.hp,100);assert(miss.events.some(e=>e.kind==='fade'));
 assert.equal(intercept.pilot.hp,100);assert.equal(intercept.game.shots.length,0);assert.equal(intercept.events.filter(e=>e.kind==='intercept').length,1);
 assert(!intercept.events.some(e=>e.kind==='hit'));assert.equal(intercept.pilot.kills,0);

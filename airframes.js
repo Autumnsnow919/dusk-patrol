@@ -3,7 +3,19 @@ const AirframeJoints={
   slots:{6:0,7:1,8:2,15:3,16:4,20:5,21:6},
   index(part,x){return this.slots[part]*2+(x<0?0:1);}
 };
-function buildPlane(type = 'comet', cells = null) {
+// IDs 1–4 index uWear, 5–8 index uGearWear. Zero is unpainted scenery or FX.
+const damageZones=[null,'fuselage','leftWing','rightWing','tail','leftGear','rightGear','noseGear','engine'];
+const wingParts=new Set(['main wing','tip lamp','foreplane','foreplane bearing','joined rear wing','winglet']);
+const tailParts=new Set(['fin and rudder','tailplane','tail boom','boom tailplane','ventral fin','tail fairing']);
+const engineParts=new Set(['nacelle','nozzle','rotor','fan mount','propeller','spinner']);
+function zoneOf(component,center){
+  if(wingParts.has(component))return center[0]<0?2:3;
+  if(tailParts.has(component))return 4;
+  if(engineParts.has(component))return 8;
+  if(component==='gear leg'||component==='wheel')return center[2]>1.7?7:center[0]<0?5:6;
+  return 1;
+}
+function buildPlane(type = 'comet', cells = null, triangleParts = null) {
   const fleet=typeof module==='undefined'?Flight.fleet:require('./flight.js').fleet;
   const bolt=type==='bolt'||type==='ribbonBolt';
   const GREY=bolt?[.85,.84,.75]:fleet[type].color, SLATE=GREY.map((channel,index)=>channel*(index===2?.75:.54)), PALE=[.84,.86,.90];
@@ -25,6 +37,7 @@ function buildPlane(type = 'comet', cells = null) {
     const g = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
     if (n[0] * (g[0] - ctr[0]) + n[1] * (g[1] - ctr[1]) + n[2] * (g[2] - ctr[2]) < 0) n = [-n[0], -n[1], -n[2]];
     const cc = typeof col === 'function' ? col(n, g) : col;
+    if(triangleParts)triangleParts.push(mat===14?0:zoneOf(component,g));
     for (const p of [a, b, c]) out.push(p[0], p[1], p[2], n[0], n[1], n[2], cc[0], cc[1], cc[2], mat);
   }
   // rings: arrays of points, all the same length; cols: one colour (or fn) per segment
@@ -64,6 +77,7 @@ function buildPlane(type = 'comet', cells = null) {
     return {data:new Float32Array(out),solidEnd:out.length/10};
   }
   const spec=fleet[type], [span,rise,sweep]=spec.tip;
+  const flanker=type==='su27'||type==='j16';
   const prop=type==='rv8a'||type==='sail',sail=type==='sail';
   function joint(part,side,a,b,reverse=false){
     const i=3*AirframeJoints.index(part,side);
@@ -105,6 +119,16 @@ function buildPlane(type = 'comet', cells = null) {
     if(type==='cirrus'){root.splice(0,5,.48,14.6,.72,.43,.13);knee.splice(0,5,5.35,9,-1.65,.23,.26);tip[1]=1.35;}
     if(type==='ibis'){root.splice(0,5,.5,6.4,-3.3,.32,.12);knee.splice(0,5,3.55,4.1,-1.5,.21,.22);tip[1]=1.5;}
     if(type==='quill'){root.splice(0,5,.47,8.2,-2.4,.21,.12);knee.splice(0,5,2.8,4.2,-4,.15,.20);tip[1]=.95;}
+    if(flanker){
+      tip[1]=1.78;
+      return [[.48,12.3,.82,.42,.21],[1.95,9.3,-.18,.31,.17],
+        [3.1,5.7,-1.55,.23,.17],tip];
+    }
+    if(type==='j10'){root.splice(0,5,.43,9.9,-1.55,.34,.08);knee.splice(0,5,3.6,5.5,-2.95,.21,.13);tip[1]=1.15;}
+    if(type==='j20'){
+      tip[1]=1.9;
+      return [[.52,11.4,-1.3,.40,.24],[2.2,9.1,-1.75,.33,.26],[4.25,5.8,-3,.22,.27],tip];
+    }
     if(type==='ogee'){
       tip[1]=1.4;
       return [[.48,15.6,.65,.44,.12],[1.65,12.9,-.15,.33,.17],
@@ -167,17 +191,17 @@ function buildPlane(type = 'comet', cells = null) {
   function foreplane(side){
     if(!spec.canard)return;
     const {y,z}=spec.canard;
-    const extent=type==='tandem'?7.45:type==='ember'||type==='wisp'?4.35:type==='ibis'?3.6:type==='kite'?3.8:2.95;
+    const extent=type==='tandem'?7.45:type==='ember'||type==='wisp'?4.35:type==='j20'?4.45:type==='j10'?3.30:type==='ibis'?3.6:type==='kite'?3.8:2.95;
     const outerZ=type==='tandem'?z-.3:z-.85,rootX=type==='tandem'?.49:.54;
     component='foreplane bearing';
     loft([foil(side*.30,1.4,z,.21,y-.055),foil(side*(rootX+.19),.8,z,.14,y)],[GREY]);
     component='foreplane';
-    loft([foil(side*rootX,type==='tandem'?3.5:2.9,z,.16,y),foil(side*extent,type==='tandem'?1.4:1.05,outerZ,.09,y+(type==='tandem'?.36:.12))],[PALE],19);
+    loft([foil(side*rootX,type==='tandem'?3.5:2.9,z,.16,y),foil(side*extent,type==='tandem'?1.4:1.05,outerZ,.09,y+(type==='tandem'?.36:.12))],[type==='j20'?GREY:PALE],19);
   }
   // Wheel centres at full extension match the runway solver. The upper end of
   // each leg sits inside the belly or nacelle and stays put through the gear cycle.
   for(const [wx,wz,radius] of [[-(sail?.68:1.75),-1,.46],[sail?.68:1.75,-1,.46],[0,3.25,.35]]){
-    const axle=-2.5+radius,rootX=wx*(prop?.48:.82);
+    const axle=-2.5+radius,rootX=wx*((prop||spec.singleEngine) ? .48 : .82);
     component='gear leg';
     loft([finS(-.18,rootX,.38,wz,.16),finS(axle,wx,.27,wz,.12)],[PALE],9);
     component='wheel';
@@ -200,20 +224,39 @@ function buildPlane(type = 'comet', cells = null) {
     fin(1,[0,.27,-5.33,2.95,.14],[0,2.55,-6.29,1.65,.08]);
     return {data:new Float32Array(out),solidEnd:out.length/10,pivots,axes};
   }
-  const tapered=type==='quill'||type==='ogee';
-  const nose=[ell(spec.noseLength??10.4,.05,.05,0)];
+  const tapered=type==='quill'||type==='ogee'||flanker;
+  // The angular cross sections give the J-20 a wide shoulder below its canopy.
+  const skin=type==='j20'?(z,w,h,y)=>[[0,y+h,z],[-w*.73,y+h*.78,z],[-w*1.55,y+h*.20,z],
+    [-w*1.35,y-h*.26,z],[-w*.66,y-h*.78,z],[0,y-h,z],[w*.66,y-h*.78,z],
+    [w*1.35,y-h*.26,z],[w*1.55,y+h*.20,z],[w*.73,y+h*.78,z]]:ell;
+  const nose=[skin(spec.noseLength??10.4,.05,.05,0)];
   if(tapered)nose.push(ell(spec.noseLength*.81,.30,.21,0));
-  nose.push(ell(9.2,tapered?.57:.34,tapered?.46:.32,.02));
-  loft([...nose,ell(7.6,.62,.58,.08),ell(5.6,.88,.82,.2),ell(3.2,1.02,.95,.3),ell(.5,1.05,.9,.3),ell(-3.5,1,.8,.25),ell(-7,.8,.6,.2),ell(-8.9,.32,.28,.2)],
+  nose.push(skin(9.2,type==='j20'?.67:tapered?.57:.34,tapered?.46:.32,.02));
+  loft([...nose,skin(7.6,.62,.58,.08),skin(5.6,.88,.82,.2),skin(3.2,1.02,.95,.3),skin(.5,1.05,.9,.3),skin(-3.5,1,.8,.25),skin(-7,.8,.6,.2),skin(-8.9,.32,.28,.2)],
     tapered?[RADOME,GREY,GREY,camo,camo,camo,camo,camo,camo]:[RADOME,RADOME,camo,camo,camo,camo,camo,camo]);
-  for(const side of [-1,1]){
+  for(const side of spec.singleEngine?[0]:[-1,1]){
     const cx=side*1.32;
     component='nacelle';
-    loft([ell(2.66,.50,.56,-.2,8,side*1.46),ell(2.6,.64,.70,-.2,8,side*1.46),ell(1.5,.80,.82,-.18,8,side*1.42),ell(-2,.90,.86,-.14,8,side*1.36),ell(-6.5,.86,.82,-.12,8,cx),ell(-8.4,.80,.78,-.12,8,cx)],[DARK,camo,camo,camo,camo]);
+    if(spec.singleEngine){
+      loft([ell(4.07,.63,.33,-.73,8),ell(4.0,.76,.50,-.7,8),ell(1,.85,.63,-.57,8),
+        ell(-4,1,.85,-.29,8),ell(-8.4,.84,.78,-.12,8)],[DARK,camo,camo,camo]);
+    }else if(type==='j20'){
+      const intake=(z,x,w,h)=>[[side*(x-w),.44,z+.52],[side*(x+w*.55),.44,z+.32],
+        [side*(x+w),.06,z],[side*(x+w*.84),-h,z-.54],[side*(x-w),-h,z-.32]];
+      loft([intake(3.7,1.45,.63,.57),intake(3.55,1.46,.75,.65),intake(1.8,1.5,.80,.71),
+        intake(-3.7,1.38,.82,.73),intake(-7.9,1.32,.68,.70)],[DARK,camo,camo,camo]);
+    }else loft([ell(2.66,.50,.56,-.2,8,side*1.46),ell(2.6,.64,.70,-.2,8,side*1.46),ell(1.5,.80,.82,-.18,8,side*1.42),ell(-2,.90,.86,-.14,8,side*1.36),ell(-6.5,.86,.82,-.12,8,cx),ell(-8.4,.80,.78,-.12,8,cx)],[DARK,camo,camo,camo,camo]);
     component='nozzle';
     loft([ell(-7.96,.64,.63,-.12,8,cx),ell(-9.50,.60,.60,-.12,8,cx)],[NOZZLE],11);
     loft([ell(-9.53,.51,.51,-.12,8,cx),ell(-17.53,.025,.025,-.12,8,cx)],[GLOW],12,false);
     loft([ell(-9.485,.50,.50,-.12,8,cx),ell(-9.51,.50,.50,-.12,8,cx)],[GLOW],13);
+  }
+  if(flanker){
+    component='tail fairing';
+    loft([ell(-7.2,.54,.4,.28),ell(-9.5,.40,.33,.25),ell(-11.35,.12,.1,.22)],[GREY,SLATE]);
+  }
+  for(const side of [-1,1]){
+    const cx=side*1.32;
     wing(side);foreplane(side);
     if(type==='gull'||type==='loom'){
       const high=type==='loom'?2.45:1.72;
@@ -229,7 +272,11 @@ function buildPlane(type = 'comet', cells = null) {
       component='boom tailplane';hingedBand(foil(0,1.9,-9.25,.14,1.98),foil(side*4.24,1.9,-9.25,.14,1.98),6,side,PALE);
     }else{
       if(!spec.elevon && type!=='tandem')stabilator(side,1.46,.03,-7.22,3.35,-8.36);
-      if(type==='cirrus'){
+      if(flanker){
+        fin(side,[side*1.52,.37,-5.9,4.35,.22],[side*1.82,3.85,-7.2,1.7,.11]);
+      }else if(type==='j20'){
+        fin(side,[cx,.35,-6.2,4.3,.24],[side*3.9,3.05,-7.75,1.86,.12]);
+      }else if(type==='cirrus'){
         fin(side,[cx,.32,-5.7,4.25,.21],[side*4.6,2.18,-7.92,1.62,.10]);
       }else if(['comet','pulse','aurora','skate','opal'].includes(type)){
         const wide=type==='skate'||type==='opal';
@@ -270,7 +317,11 @@ function buildPlane(type = 'comet', cells = null) {
   }
   component='canopy';
   const can=(z,w,h,y)=>[[-w,y-.14,z],[-w*.86,y+.72*h,z],[-w*.36,y+h,z],[w*.36,y+h,z],[w*.86,y+.72*h,z],[w,y-.14,z]];
-  loft([can(6.5,.28,.10,.75),can(5.5,.60,.8,.80),can(4.1,.70,.98,.90),can(2.7,.5,.42,.91)],[GLASS],3);
+  if(type==='j16'){
+    loft([can(6.7,.29,.16,.75),can(5.6,.64,.85,.83),can(4.55,.69,.89,.89)],[GLASS],3);
+    loft([can(4.55,.69,.89,.89),can(4.32,.72,.91,.91)],[GREY]);
+    loft([can(4.32,.72,.91,.91),can(3.35,.72,1.02,.94),can(1.65,.50,.30,.91)],[GLASS],3);
+  }else loft([can(6.5,.28,.10,.75),can(5.5,.60,.8,.80),can(4.1,.70,.98,.90),can(2.7,.5,.42,.91)],[GLASS],3);
   const solidEnd=out.length/10;
   // The cloud is scenery attached to the wing outline. Each ring samples the
   // same spanwise chord, sweep and height used to build the model above.
@@ -286,4 +337,4 @@ function buildPlane(type = 'comet', cells = null) {
     [PALE],14,false);
   return {data:new Float32Array(out),solidEnd,pivots,axes};
 }
-if(typeof module!=='undefined')module.exports={buildPlane,AirframeJoints};
+if(typeof module!=='undefined')module.exports={buildPlane,AirframeJoints,damageZones};

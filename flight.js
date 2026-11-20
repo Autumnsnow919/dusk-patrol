@@ -36,10 +36,16 @@ const Flight = (() => {
   fleet.quill={...fleet.spire,name:'云针 Q-5',role:'细长机鼻通场机',noseLength:19.4,cruise:219,mass:5500,area:23,yawDamper:true,inertia:[5700,15100,13800]};
   fleet.ogee={...fleet.delta,name:'白浪 D-8',role:'曲边三角翼巡航机',noseLength:13.2,cruise:177,mass:5600,area:43,roll:2.85,elevon:true,landingFlaps:true,inertia:[7900,15200,13700]};
   fleet.delta.elevon=true;
+  // These pixel models borrow silhouettes. Their handling uses club game presets.
+  fleet.su27={...fleet.comet,name:'苏-27',role:'单座双发 · 外形复刻',noseLength:12.1,roll:3.85,wingLevel:true};
+  fleet.j10={...fleet.wisp,name:'歼-10',role:'单发鸭式 · 外形复刻',singleEngine:true,elevon:true,landingFlaps:true,roll:4.5,noseLength:10.8};
+  fleet.j20={...fleet.cirrus,name:'歼-20',role:'双发鸭式 · 外形复刻',noseLength:13.5,wingLevel:false,yawDamper:true};
+  fleet.j16={...fleet.comet,name:'歼-16',role:'串列双座 · 外形复刻',noseLength:12.1,roll:3.15,pitch:1.72,yawDamper:true};
   // Hinge height and station in mesh units, followed by differential and lift-mode travel.
   for(const [type,y,z,mix,lift] of [
     ['kite',.24,4.62,.13,0],['pulse',.24,4.62,0,0],['petrel',.24,4.62,.19,0],['aurora',.24,4.62,.12,0],
-    ['lance',.4,5.42,0,0],['wisp',.52,4.2,0,.32],['ember',.42,4.7,.23,0],['tandem',.85,3.6,0,.22],['ibis',.40,4.85,.16,0]
+    ['lance',.4,5.42,0,0],['wisp',.52,4.2,0,.32],['ember',.42,4.7,.23,0],['tandem',.85,3.6,0,.22],['ibis',.40,4.85,.16,0],
+    ['j10',.42,3.85,.13,.22],['j20',.50,4.35,.18,0]
   ])fleet[type].canard={y,z,mix,lift};
   function canardAngle(spec,pitch,roll,deploy,side){
     const c=spec.canard;
@@ -48,7 +54,13 @@ const Flight = (() => {
   const highPower={quill:81000,ogee:114000,cirrus:108000,ibis:73000,nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
     needle:16000,delta:90000,petrel:65000,aurora:99000,spire:80000,skate:74000,wisp:70000,opal:70000,lance:81000};
   for(const [type,boost] of Object.entries(highPower))fleet[type].highPower=boost;
+  for(const [type,preset] of [['su27','comet'],['j10','wisp'],['j20','cirrus'],['j16','comet']])
+    fleet[type].highPower=fleet[preset].highPower;
   const cards={
+    su27:['翼平辅助','蓝色单座机，翼根前伸，两根直立尾翼之间伸出尾锥。松开 A/D 并按住 V，适合改平后加入编队。',[7.85,.22,-3.6],[.45,.67,.84]],
+    j10:['增升进近','机腹进气，单喷口，主翼前方装有活动鸭翼。V 放下内襟翼，轻点 W/S 可以看到鸭翼偏转。',[6.15,.16,-4.45],[.71,.76,.78]],
+    j20:['稳向通场','长机身两侧有折线棱边，鸭翼在主翼之前，两片垂尾向外倾。按住 V 增加航向阻尼。',[7.4,.28,-4.95],[.47,.53,.58]],
+    j16:['双座巡航','深灰机身配串列双座舱盖，沿用侧卫家族双尾和尾锥。游戏滚转较苏-27 缓和，V 稳住航向。',[7.9,.20,-3.65],[.39,.45,.53]],
     quill:['通场稳向','长机鼻伸出座舱前方，窄翼靠后。按住 V 稳定航向，适合从固定机位前高速通场。',[5.1,.28,-5.6],[.74,.81,.86]],
     ogee:['曲边增升翼','宽翼根向外收成曲线。按住 V 放下内襟翼减速进近，外侧升降副翼继续控制滚转。',[9.5,.23,-6.1],[.86,.80,.64]],
     cirrus:['巡航翼平','宽大的折线翼接上低矮双尾。按住 V 并松开滚转键，飞机会自己放平两翼。',[10.8,.38,-6.3],[.48,.60,.70]],

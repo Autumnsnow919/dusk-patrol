@@ -1,5 +1,5 @@
 // Continuous collision tests for translated game meshes. All coordinates match the renderer.
-const {buildPlane,AirframeJoints}=require('./airframes.js');
+const {buildPlane,AirframeJoints,damageZones}=require('./airframes.js');
 const Lake=require('./lake.js');
 const Flight=require('./flight.js');
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
@@ -47,14 +47,14 @@ function tree(tris){
 }
 function model(type){
   if(models.has(type))return models.get(type);
-  const scenery=type==='scenery',shape=scenery?null:buildPlane(type),data=scenery?Lake.vertices():shape.data,scale=scenery?1:1.3,tris=[];
+  const components=[],scenery=type==='scenery',shape=scenery?null:buildPlane(type,null,components),data=scenery?Lake.vertices():shape.data,scale=scenery?1:1.3,tris=[];
   const solidFloats=scenery?data.length:shape.solidEnd*10;
   for(let i=0;i<solidFloats;i+=30){
     const mat=data[i+9];if([12,13,14].includes(mat))continue;
     const p=[0,10,20].map(off=>[0,1,2].map(j=>data[i+off+j]*scale));
     const box=[0,1,2].flatMap(j=>[Math.min(p[0][j],p[1][j],p[2][j]),Math.max(p[0][j],p[1][j],p[2][j])]);
     if(mat>=6)for(let d=0;d<6;d++)box[d]+=(d%2?1:-1)*6.5;
-    tris.push({p,box,mat});
+    tris.push({p,box,mat,part:scenery?null:damageZones[components[i/30]]});
   }
   const root=tree(tris);if(shape){root.pivots=shape.pivots;root.axes=shape.axes;}models.set(type,root);return root;
 }
@@ -117,10 +117,9 @@ function posed(vertex,mat,b){
   }
   return p.map(n=>n*1.3);
 }
-function contact(shot,type,start,end,basis,body){
+function contact(shot,type,start,end,basis,body,detail){
   const a=local(sub(shot.prev,start),basis),b=local(sub(shot.pos,end),basis);
   const box=[0,1,2].flatMap(i=>[Math.min(a[i],b[i])-radius,Math.max(a[i],b[i])+radius]);
-  if(type!=='scenery'&&box.some((v,i)=>i%2?v < -24:v>24))return Infinity;
   const root=model(type);if(!overlaps(box,root.box))return Infinity;
   const movement=local(world(sub(b,a),basis),shot.axes);
   let first=Infinity;
@@ -130,7 +129,10 @@ function contact(shot,type,start,end,basis,body){
     for(const t of node.tris){
       if(!overlaps(box,t.box))continue;
       const tri=t.p.map(p=>local(world(sub(posed(p,t.mat,body),a),basis),shot.axes));
-      for(const h of hulls)first=Math.min(first,sweepTriangle(h,tri,movement,Math.min(1,first)));
+      for(const h of hulls){
+        const at=sweepTriangle(h,tri,movement,Math.min(1,first));
+        if(at<first){first=at;if(detail)detail.part=t.part;}
+      }
     }
   }
   visit(root);return first;
@@ -142,9 +144,9 @@ function sweptApart(a,b,c,d,limit){
   }
   return false;
 }
-function plane(shot,body,previous=body.pos){
+function plane(shot,body,previous=body.pos,detail){
   if(sweptApart(shot.prev,shot.pos,previous,body.pos,32+radius))return Infinity;
-  return contact(shot,body.type,previous,body.pos,body.basis,body);
+  return contact(shot,body.type,previous,body.pos,body.basis,body,detail);
 }
 function scenery(shot){
   if(Math.min(shot.prev[1],shot.pos[1])>Lake.sceneryTop+radius)return Infinity;

@@ -8,6 +8,11 @@ const PeerPose=require('./peer-pose.js');
 const Bolts=require('./bolts.cjs');
 const Contact=require('./contacts.cjs');
 const PatrolWaves=require('./waves.cjs');
+// Shared arcade balance for every aircraft. HP is hull condition, while a
+// struck component has its own condition that affects the existing flight rig.
+const wingHit={hull:.42,local:.78},gearHit={hull:.18,local:1};
+const missileHits={fuselage:{hull:1,local:1},engine:{hull:.62,local:.88},tail:{hull:.54,local:.82},
+  leftWing:wingHit,rightWing:wingHit,noseGear:gearHit,leftGear:gearHit,rightGear:gearHit};
 const weapons = {
   echo:{wait:5,range:155,damage:28},arc:{wait:6,range:440,jump:210,damage:18},
   glyph:{wait:4.2,range:700,damage:30},prism:{wait:6.5},
@@ -154,7 +159,7 @@ class Arena {
     if(this.events.length>48) this.events.shift();
     return this.events[this.events.length-1];
   }
-  damage(from,to,amount,part) {
+  damage(from,to,amount,part,localWear=amount*.8,impact=null) {
     if(to.hp<=0 || to.shield>this.time || (from!==to && !this.opponents(from,to))) return;
     if(from!==to && to.prismUntil>this.time){
       to.prismUntil=0;this.event('refract',from,to);return;
@@ -163,7 +168,8 @@ class Arena {
       to.tags.set(from.id,this.time);
       Fields.wear(to.body,'fuselage',amount);
       const zone=part||Fields.sector(to.body,from.body.pos);
-      if(zone!=='fuselage')Fields.wear(to.body,zone,amount*.8);
+      if(zone!=='fuselage')Fields.wear(to.body,zone,localWear);
+      if(impact)impact.part=zone;
     }
     to.hp=Math.max(0,Math.min(to.hp-amount,to.body.condition.fuselage));
     if(!to.hp) {
@@ -345,10 +351,11 @@ class Arena {
       const ended=Bolts.move(shot,target,dt),wall=Bolts.obstacle(shot);
       if(wall<=1)contacts.push({at:wall,kind:'fade',shot,from});
       else if(ended)contacts.push({at:1,kind:'fade',expires:true,shot,from});
+      const detail={};
       for(const peer of this.players.values()){
         if(!peer.hp||!from||!this.opponents(from,peer)||peer.shield>this.time)continue;
-        const at=Contact.plane(shot,peer.body,peer.priorPos);
-        if(at<=1)contacts.push({at,kind:'hit',shot,from,peer});
+        const at=Contact.plane(shot,peer.body,peer.priorPos,detail);
+        if(at<=1)contacts.push({at,kind:'hit',shot,from,peer,part:detail.part});
       }
     }
     const nearby=[];
@@ -397,13 +404,16 @@ class Arena {
       // Resolve in sub-tick order so a later intercept cannot cancel an earlier impact.
       const spentShots=new Set(),spentRounds=new Set();
       contacts.sort((a,b)=>a.at-b.at || Number(!!a.expires)-Number(!!b.expires));
-      for(const {at,kind,shot,t,from,peer,point} of contacts){
+      for(const {at,kind,shot,t,from,peer,point,part} of contacts){
         if(spentShots.has(shot)||spentRounds.has(t))continue;
         if(t)spentRounds.add(t);if(shot)spentShots.add(shot);
         if(kind==='wall'||!from)continue;
         const p=point||shot.prev.map((v,i)=>v+(shot.pos[i]-v)*at);
-        if(kind==='hit'||kind==='spark')hits.push([from,peer,weapons[kind==='hit'?shot.type:'gun'].damage,Fields.sector(peer.body,p)]);
-        this.event(kind,from,peer||from,p,p);
+        const effect=this.event(kind,from,peer||from,p,p);
+        if(kind==='hit'){
+          const base=weapons[shot.type].damage,loss=missileHits[part];
+          hits.push([from,peer,base*loss.hull,part,base*loss.local,effect]);
+        }else if(kind==='spark')hits.push([from,peer,weapons.gun.damage,Fields.sector(peer.body,p)]);
       }
       if(spentShots.size)this.shots=this.shots.filter(s=>!spentShots.has(s));
       if(spentRounds.size)this.tracers=this.tracers.filter(t=>!spentRounds.has(t));

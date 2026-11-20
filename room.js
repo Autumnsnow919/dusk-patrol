@@ -42,7 +42,7 @@ class FlightRoom {
     this.leave();
     const version=this.generation;
     const reply=await this.request('join',{room,type,mode,name,rule});
-    if(reply.mode!==mode||reply.protocol!==12||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw new Error('旧版房主');}
+    if(reply.mode!==mode||reply.protocol!==13||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw new Error('旧版房主');}
     if(version!==this.generation) { this.request('leave',{},reply.token).catch(()=>{}); return null; }
     this.token=reply.token; this.id=reply.id;this.name=reply.name;this.mode=mode;this.rule=rule;this.code=reply.room??room; this.status=this.code+' · 1/8'; this.nextSync=0; return reply;
   }
