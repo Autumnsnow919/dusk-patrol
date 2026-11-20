@@ -106,21 +106,21 @@ class FlightAudio {
     }
     this.bank.set(name,buffer);return buffer;
   }
-  voice(name,volume,pan=0,loop=false){
+  voice(name,volume,pan=0,loop=false,rate=1){
     const c=this.ctx,node=c.createBufferSource(),gain=c.createGain();
     const stereo=c.createStereoPanner?c.createStereoPanner():null;
-    node.buffer=this.sample(name);node.loop=loop;node.connect(gain);gain.gain.value=volume;
+    node.buffer=this.sample(name);node.loop=loop;node.playbackRate.value=rate;node.connect(gain);gain.gain.value=volume;
     if(stereo){stereo.pan.value=pan;gain.connect(stereo);stereo.connect(this.bus);}
     else gain.connect(this.bus);
     this.voices.add(node);
     node.onended=()=>{this.voices.delete(node);node.disconnect();gain.disconnect();stereo?.disconnect();};
     node.start();return {node,gain,stereo};
   }
-  cue(name,volume=.65,pan=0,gap=0){
+  cue(name,volume=.65,pan=0,gap=0,rate=1){
     if(!this.audible || volume<.012 || this.voices.size>=28)return;
     const t=this.ctx.currentTime;
     if(t-(this.lastCue.get(name)??-10)<gap)return;
-    this.lastCue.set(name,t);this.voice(name,volume,pan);
+    this.lastCue.set(name,t);this.voice(name,volume,pan,false,rate);
   }
   stopGun(id){
     const voice=this.guns.get(id);if(!voice)return;

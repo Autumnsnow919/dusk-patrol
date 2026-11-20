@@ -48,7 +48,8 @@ function tree(tris){
 function model(type){
   if(models.has(type))return models.get(type);
   const scenery=type==='scenery',shape=scenery?null:buildPlane(type),data=scenery?Lake.vertices():shape.data,scale=scenery?1:1.3,tris=[];
-  for(let i=0;i<data.length;i+=30){
+  const solidFloats=scenery?data.length:shape.solidEnd*10;
+  for(let i=0;i<solidFloats;i+=30){
     const mat=data[i+9];if([12,13,14].includes(mat))continue;
     const p=[0,10,20].map(off=>[0,1,2].map(j=>data[i+off+j]*scale));
     const box=[0,1,2].flatMap(j=>[Math.min(p[0][j],p[1][j],p[2][j]),Math.max(p[0][j],p[1][j],p[2][j])]);

@@ -56,7 +56,8 @@ class Arena {
     return b && a!==b && (!this.mission || a.bot!==b.bot);
   }
   scan(player,spec,dt) {
-    const marks=player.marks,requested=this.players.get(player.target);
+    const marks=player.marks;
+    let requested=this.players.get(player.target);
     const cooling=player[player.weapon+'At']>this.time;
     const eligible=peer=>this.opponents(player,peer)&&peer.hp>0&&peer.shield<=this.time
       && !(cooling&&player.lastFired===peer.id)
@@ -65,7 +66,19 @@ class Arena {
       const peer=this.players.get(id);
       if(!eligible(peer)||peer.life!==mark.life)marks.delete(id);
     }
-    if(!marks.has(player.target)&&eligible(requested)){
+    if(player.autoFocus && !player.fire){
+      // Choose the room avatar nearest the center of the on-screen reticle.
+      let best=Infinity;
+      const {pos,basis}=player.body;
+      for(const peer of this.players.values()){
+        if(!eligible(peer))continue;
+        const dx=peer.body.pos[0]-pos[0],dy=peer.body.pos[1]-pos[1],dz=peer.body.pos[2]-pos[2];
+        const ahead=dx*basis.f[0]+dy*basis.f[1]+dz*basis.f[2];
+        const offset=(dx*dx+dy*dy+dz*dz)/(ahead*ahead);
+        if(offset<best){best=offset;requested=peer;}
+      }
+    }
+    if(eligible(requested)&&!marks.has(requested.id)){
       if(marks.size===Sight.trackSlots)marks.delete([...marks.keys()].at(-1));
       marks.set(requested.id,{life:requested.life,time:0});
     }
@@ -74,7 +87,7 @@ class Arena {
       if(!marks.has(peer.id)&&eligible(peer))marks.set(peer.id,{life:peer.life,time:0});
     }
     for(const mark of marks.values())mark.time=Math.min(spec.fill,mark.time+dt);
-    player.focus=marks.has(player.target)?player.target:(marks.keys().next().value??null);
+    player.focus=marks.has(requested?.id)?requested.id:(marks.keys().next().value??null);
     player.acquire=marks.get(player.focus)?.time??0;
     return this.players.get(player.focus);
   }
@@ -110,6 +123,8 @@ class Arena {
     player.target=this.opponents(player,this.players.get(data.target))?data.target:null;
     player.tap=equipped && data.weapon==='gun' && data.tap===true;
     player.fire=equipped && data.fire===true; player.lastInput=this.time;
+    player.autoFocus=data.autoFocus===true;
+    player.fireLife=data.fireLife??this.players.get(player.target)?.life;
     // The sync reply is sent before the next physics tick. Echo the new primary
     // immediately without awarding a second slice of capture time.
     if(selectionChanged && equipped && Sight.profiles[player.weapon] && player.refitAt<=this.time && player.shield<=this.time)
@@ -251,7 +266,7 @@ class Arena {
       if(freeGun && (player.fire||player.tap) && !player.hot && player.gunAt<=this.time+1e-8){
         const b=player.body,dir=b.basis.f;
         player.lastGun=this.time;player.gunAt=this.time+weapons.gun.wait;
-        player.heat=Math.min(1,player.heat+1/44+1e-12);player.hot=player.heat>=1;
+        player.heat=Math.min(1,player.heat+1/Sight.gunCapacity+1e-12);player.hot=player.heat>=1;
         const pos=b.pos.map((v,i)=>v+dir[i]*14),vel=b.vel.map((v,i)=>v+dir[i]*Sight.streakSpeed);
         const id=++this.tracerId;
         player.gunCount++;
@@ -307,7 +322,7 @@ class Arena {
       }
       const point=other.body.pos;
       if(missile){
-        if(player.acquire<missile.fill || (player.target && player.target!==other.id))continue;
+        if(player.acquire<missile.fill || player.target!==other.id || player.fireLife!==other.life)continue;
       }else if(!Sight.inRing(player.body,point,Sight.laser.ring,spec.range)){
         player.laser=0;continue;
       }
@@ -318,7 +333,7 @@ class Arena {
       this.event(player.weapon,player,other,player.body.pos,point);
       if(missile){
         this.shots.push(Bolts.launch(++this.shotId,player,other,player.weapon));
-        player.lastFired=other.id;player.marks.delete(other.id);player.focus=null;player.acquire=0;
+        player.lastFired=other.id;player.marks.delete(other.id);player.focus=null;player.acquire=0;player.fire=false;
       }else hits.push([player,other,spec.damage]);
     }
     // Finite-lived arcade streaks. Sample the short tick segment in order so scenery
@@ -328,7 +343,8 @@ class Arena {
       const target=this.players.get(shot.to),from=this.players.get(shot.from);
       if(!target?.hp || target.life!==shot.life){contacts.push({at:0,kind:'fade',shot,from});continue;}
       const ended=Bolts.move(shot,target,dt),wall=Bolts.obstacle(shot);
-      if(wall<=1 || ended)contacts.push({at:Math.min(wall,1),kind:'fade',shot,from});
+      if(wall<=1)contacts.push({at:wall,kind:'fade',shot,from});
+      else if(ended)contacts.push({at:1,kind:'fade',expires:true,shot,from});
       for(const peer of this.players.values()){
         if(!peer.hp||!from||!this.opponents(from,peer)||peer.shield>this.time)continue;
         const at=Contact.plane(shot,peer.body,peer.priorPos);
@@ -380,7 +396,7 @@ class Arena {
     if(contacts.length){
       // Resolve in sub-tick order so a later intercept cannot cancel an earlier impact.
       const spentShots=new Set(),spentRounds=new Set();
-      contacts.sort((a,b)=>a.at-b.at);
+      contacts.sort((a,b)=>a.at-b.at || Number(!!a.expires)-Number(!!b.expires));
       for(const {at,kind,shot,t,from,peer,point} of contacts){
         if(spentShots.has(shot)||spentRounds.has(t))continue;
         if(t)spentRounds.add(t);if(shot)spentShots.add(shot);

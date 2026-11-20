@@ -104,28 +104,39 @@ function buildPlane(type = 'comet', cells = null) {
     if(type==='nocturne'){root.splice(0,5,.45,14,1.1,.36,.18);knee.splice(0,5,span*.52,7.6,-.85,.24,.27);}
     if(type==='cirrus'){root.splice(0,5,.48,14.6,.72,.43,.13);knee.splice(0,5,5.35,9,-1.65,.23,.26);tip[1]=1.35;}
     if(type==='ibis'){root.splice(0,5,.5,6.4,-3.3,.32,.12);knee.splice(0,5,3.55,4.1,-1.5,.21,.22);tip[1]=1.5;}
+    if(type==='quill'){root.splice(0,5,.47,8.2,-2.4,.21,.12);knee.splice(0,5,2.8,4.2,-4,.15,.20);tip[1]=.95;}
+    if(type==='ogee'){
+      tip[1]=1.4;
+      return [[.48,15.6,.65,.44,.12],[1.65,12.9,-.15,.33,.17],
+        [3.4,8.1,-2.15,.25,.23],[5.15,5.3,-3.42,.17,.26],tip];
+    }
     if(type==='ember')root.splice(0,5,.45,10,-1.1,.32,.16);
     if(type==='opal')knee.splice(0,5,4.45,5.1,-.55,.24,.52);
     if(type==='heron')knee.splice(0,5,5.2,3.6,.72,.22,.38);
     return [root,knee,tip];
   }
   const wingStations=profile();
-  function sectionAt(stations,x,side){
-    const i=x<=stations[1][0]?0:1,a=stations[i],b=stations[i+1];
-    const s=mix(a,b,(x-a[0])/(b[0]-a[0]));s[0]=x*side;return foil(...s);
+  function wingSection(x){
+    x=Math.max(wingStations[0][0],Math.min(span,x));
+    let i=1;while(wingStations[i][0]<x)i++;
+    const a=wingStations[i-1],b=wingStations[i];
+    return mix(a,b,(x-a[0])/(b[0]-a[0]));
+  }
+  function sectionAt(x,side){
+    const section=wingSection(x);section[0]=x*side;return foil(...section);
   }
   function wing(side){
-    const [root,knee,tip]=wingStations;
-    const equippedFlap=['tern','wisp','delta'].includes(type);
+    const knee=wingStations[type==='ogee'?2:1];
+    const equippedFlap=['tern','wisp','delta'].includes(type)||spec.landingFlaps;
     const outerStart=Math.max(span*.59,knee[0]);
     const outerEnd=span*(type==='nocturne'?.78:.95);
     const flapStart=Math.min(1.95,knee[0]-.6);
-    const cuts=[root[0],knee[0],outerStart,outerEnd,span];
+    const cuts=[...wingStations.map(station=>station[0]),outerStart,outerEnd];
     if(equippedFlap)cuts.push(flapStart);
     if(type==='nocturne')cuts.push(span*.96);
     const stations=[...new Set(cuts)].sort((a,b)=>a-b);
     for(let i=1;i<stations.length;i++){
-      const x=stations[i-1],X=stations[i],a=sectionAt(wingStations,x,side),b=sectionAt(wingStations,X,side);
+      const x=stations[i-1],X=stations[i],a=sectionAt(x,side),b=sectionAt(X,side);
       component='main wing';
       if(equippedFlap && x===flapStart && X===knee[0])hingedBand(a,b,15,side,camo);
       else if(x===outerStart && X===outerEnd)hingedBand(a,b,8,side,camo);
@@ -189,7 +200,12 @@ function buildPlane(type = 'comet', cells = null) {
     fin(1,[0,.27,-5.33,2.95,.14],[0,2.55,-6.29,1.65,.08]);
     return {data:new Float32Array(out),solidEnd:out.length/10,pivots,axes};
   }
-  loft([ell(type==='spire'?16:type==='needle'?14.5:10.4,.05,.05,0),ell(9.2,.34,.32,.02),ell(7.6,.62,.58,.08),ell(5.6,.88,.82,.2),ell(3.2,1.02,.95,.3),ell(.5,1.05,.9,.3),ell(-3.5,1,.8,.25),ell(-7,.8,.6,.2),ell(-8.9,.32,.28,.2)],[RADOME,RADOME,camo,camo,camo,camo,camo,camo]);
+  const tapered=type==='quill'||type==='ogee';
+  const nose=[ell(spec.noseLength??10.4,.05,.05,0)];
+  if(tapered)nose.push(ell(spec.noseLength*.81,.30,.21,0));
+  nose.push(ell(9.2,tapered?.57:.34,tapered?.46:.32,.02));
+  loft([...nose,ell(7.6,.62,.58,.08),ell(5.6,.88,.82,.2),ell(3.2,1.02,.95,.3),ell(.5,1.05,.9,.3),ell(-3.5,1,.8,.25),ell(-7,.8,.6,.2),ell(-8.9,.32,.28,.2)],
+    tapered?[RADOME,GREY,GREY,camo,camo,camo,camo,camo,camo]:[RADOME,RADOME,camo,camo,camo,camo,camo,camo]);
   for(const side of [-1,1]){
     const cx=side*1.32;
     component='nacelle';
@@ -255,7 +271,19 @@ function buildPlane(type = 'comet', cells = null) {
   component='canopy';
   const can=(z,w,h,y)=>[[-w,y-.14,z],[-w*.86,y+.72*h,z],[-w*.36,y+h,z],[w*.36,y+h,z],[w*.86,y+.72*h,z],[w,y-.14,z]];
   loft([can(6.5,.28,.10,.75),can(5.5,.60,.8,.80),can(4.1,.70,.98,.90),can(2.7,.5,.42,.91)],[GLASS],3);
-  loft([ell(3,1.3,1.2,0,16),ell(-6.4,11,6.4,0,16),ell(-8.2,10.7,6.1,0,16)],[PALE],14,false);
-  return {data:new Float32Array(out),solidEnd:out.length/10,pivots,axes};
+  const solidEnd=out.length/10;
+  // The cloud is scenery attached to the wing outline. Each ring samples the
+  // same spanwise chord, sweep and height used to build the model above.
+  function mistRing(width,height,chordFraction){
+    return Array.from({length:20},(_,i)=>{
+      const angle=i*Math.PI/10,x=width*span*Math.cos(angle);
+      const [,chord,z,thickness,y]=wingSection(Math.abs(x));
+      return [x,y+thickness+height*span*Math.sin(angle),z+chord*chordFraction];
+    });
+  }
+  component='condensation';
+  loft([mistRing(.19,.11,.48),mistRing(.79,.35,.10),mistRing(1.04,.42,-.32)],
+    [PALE],14,false);
+  return {data:new Float32Array(out),solidEnd,pivots,axes};
 }
 if(typeof module!=='undefined')module.exports={buildPlane,AirframeJoints};

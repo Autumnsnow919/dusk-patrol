@@ -485,7 +485,7 @@ void main(){
       float angle=p.x<0.?uCanards.z:uCanards.w;
       p.yz=rot(angle)*(p.yz-uCanards.xy)+uCanards.xy;n.yz=rot(angle)*n.yz;
     }else if(part==14.){
-      vMat=5.;p*=uPower.w;
+      vMat=5.;vCol=vec3(uPower.w);
     }
   }
   if(part>=0. && part!=14.){
@@ -525,8 +525,7 @@ void main(){
     o = vec4(c, 0.0); return;
   }
   if(vMat>4.5){
-    ivec2 cell=ivec2(gl_FragCoord.xy);
-    if((cell.x+3*cell.y)%7>1)discard;
+    if(dth>=.4*vCol.r)discard;
     o=vec4(.88,.87,.84,1.);return;
   }
   if (vMat > 3.5) { o = vec4(vCol * (0.86 + 0.14 * sin(uTime * 41.0)), 1.0); return; }   // glow in the nozzles
@@ -1137,7 +1136,7 @@ window.Cockpit = Cockpit;
     if(meshes.has(type))return meshes.get(type);
     const shape = buildPlane(type), buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, shape.data, gl.STATIC_DRAW);
-    const mesh={vao:vao(buffer,[3,3,4],10),count:shape.solidEnd,pivots:shape.pivots,axes:shape.axes};
+    const mesh={vao:vao(buffer,[3,3,4],10),count:shape.solidEnd,withMist:shape.data.length/10,pivots:shape.pivots,axes:shape.axes};
     meshes.set(type,mesh);return mesh;
   }
   const lakeBuffer=gl.createBuffer(),lakeData=Lake.vertices();
@@ -1527,7 +1526,8 @@ window.Cockpit = Cockpit;
 
     if(flying && body.mach>=1 && !body.supersonic){
       body.supersonic=true;
-      if(!orbit.anchor && !watchId)audio.cue('transonic',.8,0,3);
+      const spec=Flight.fleet[body.type];
+      if(!orbit.anchor && !watchId)audio.cue('transonic',.8*spec.boomLevel,0,3,spec.boomRate);
       notice='M 1.00 · 突破音速　I 前方通场机位';noticeUntil=performance.now()+3000;
     }else if(body.mach<.98)body.supersonic=false;
     updateCamera(dt, B);
@@ -1775,7 +1775,7 @@ window.Cockpit = Cockpit;
         gl.uniform3fv(pr.u('uPivots[0]'),mesh.pivots);gl.uniform3fv(pr.u('uJointAxes[0]'),mesh.axes);
         pr.jointMesh=mesh;
       }
-      gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,mesh.count);
+      gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,mist>.075 && pr===P.mesh?mesh.withMist:mesh.count);
     }
     const inside=cam.wCockpit>.72;
     for(const c of craft)if((!inside||c[1]!==S.pos)&&inView(c[1],48))drawAircraft(...c);
@@ -2023,7 +2023,7 @@ window.Cockpit = Cockpit;
     if(room.combat){
       if(slot>=0 && Outfit.has(room.kit,Outfit.items[slot].id))room.selectWeapon(Outfit.items[slot].id);
       if(event.code==='KeyX')room.dodge=true;
-      if(event.code==='KeyJ')room.triggerTap=true;
+      if(event.code==='KeyJ')room.pressTrigger();
       if(event.code==='KeyT')room.cycleTarget();
     }
     if(event.code==='KeyH') park();
@@ -2132,7 +2132,7 @@ window.Cockpit = Cockpit;
   soundLabel();
   function observeWaves(){
     if(S.viewT<1){waveHistory.clear();return;}
-    function check(id,pos,vel,life){
+    function check(id,type,pos,vel,life){
       const margin=Flight.boomMargin(pos,vel,cam.pos),old=waveHistory.get(id);
       if(margin===null){waveHistory.delete(id);return;}
       if(old && old.life===life && old.margin<0 && margin>=0 && S.time-old.at>1.5){
@@ -2141,13 +2141,14 @@ window.Cockpit = Cockpit;
         if(distance<2600){
           notice='激波掠过 · 音爆';noticeUntil=performance.now()+1700;
           const [,pan]=audio.position(pos,cam);
-          audio.cue('boom',1.35/(1+distance/620),pan);
+          const spec=Flight.fleet[type];
+          audio.cue('boom',1.35*spec.boomLevel/(1+distance/620),pan,0,spec.boomRate);
         }
       }
       if(old){old.margin=margin;old.life=life;}else waveHistory.set(id,{margin,life,at:-10});
     }
-    if(cam.wCockpit<.01)check('self',body.pos,body.vel);
-    for(const peer of room.peers.values())if(peer.vel && peer.hp!==0)check(peer.id,peer.displayPos,peer.vel,peer.life);
+    if(cam.wCockpit<.01)check('self',body.type,body.pos,body.vel,room.self?.life);
+    for(const peer of room.peers.values())if(peer.vel && peer.hp!==0)check(peer.id,peer.type,peer.displayPos,peer.vel,peer.life);
     for(const id of waveHistory.keys())if(id!=='self'&&!room.peers.has(id))waveHistory.delete(id);
   }
   $('btn-sound').addEventListener('click', e => { toggleSound(); e.currentTarget.blur(); });

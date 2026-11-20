@@ -32,6 +32,9 @@ const Flight = (() => {
   fleet.tandem={...fleet.tern,name:'蜻蜓 T-4',role:'串列翼巡游',mass:2150,area:36,cruise:83,thrust:8700,roll:2.7,pitch:1.85,inertia:[2900,6500,4900]};
   fleet.cirrus={...fleet.nocturne,name:'暮隼 G-6',role:'宽翼六代概念机',mass:6950,area:51,cruise:196,roll:2.9,inertia:[10400,22400,18600],wingLevel:true};
   fleet.ibis={...fleet.petrel,name:'朱鹮 F-8',role:'前掠翼表演机',mass:2850,area:24,cruise:149,roll:4.7,pitch:2.65,inertia:[2450,6200,4800],rollCoupling:true,elevon:true};
+  fleet.spire.noseLength=16;fleet.needle.noseLength=14.5;
+  fleet.quill={...fleet.spire,name:'云针 Q-5',role:'细长机鼻通场机',noseLength:19.4,cruise:219,mass:5500,area:23,yawDamper:true,inertia:[5700,15100,13800]};
+  fleet.ogee={...fleet.delta,name:'白浪 D-8',role:'曲边三角翼巡航机',noseLength:13.2,cruise:177,mass:5600,area:43,roll:2.85,elevon:true,landingFlaps:true,inertia:[7900,15200,13700]};
   fleet.delta.elevon=true;
   // Hinge height and station in mesh units, followed by differential and lift-mode travel.
   for(const [type,y,z,mix,lift] of [
@@ -42,10 +45,12 @@ const Flight = (() => {
     const c=spec.canard;
     return clamp(-.48*pitch-c.mix*roll*side-c.lift*deploy,-.67,.67);
   }
-  const highPower={cirrus:108000,ibis:73000,nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
+  const highPower={quill:81000,ogee:114000,cirrus:108000,ibis:73000,nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
     needle:16000,delta:90000,petrel:65000,aurora:99000,spire:80000,skate:74000,wisp:70000,opal:70000,lance:81000};
   for(const [type,boost] of Object.entries(highPower))fleet[type].highPower=boost;
   const cards={
+    quill:['通场稳向','长机鼻伸出座舱前方，窄翼靠后。按住 V 稳定航向，适合从固定机位前高速通场。',[5.1,.28,-5.6],[.74,.81,.86]],
+    ogee:['曲边增升翼','宽翼根向外收成曲线。按住 V 放下内襟翼减速进近，外侧升降副翼继续控制滚转。',[9.5,.23,-6.1],[.86,.80,.64]],
     cirrus:['巡航翼平','宽大的折线翼接上低矮双尾。按住 V 并松开滚转键，飞机会自己放平两翼。',[10.8,.38,-6.3],[.48,.60,.70]],
     ibis:['联动滚转','朱红翼尖向机鼻回折。按住 V 并用 Q/E 偏航，飞机随之滚转，W/S 会带动前方鸭翼。',[7.8,.62,3.5],[.88,.43,.43]],
     nocturne:['分裂减速舵','无尾折线翼以升降副翼俯仰、滚转。按住 V 张开双侧翼梢减速舵，配合 Q/E 差动转向。',[9.2,.18,-5.3],[.42,.47,.62]],
@@ -76,6 +81,11 @@ const Flight = (() => {
   };
   for(const [type,[trait,description,tip,color]] of Object.entries(cards))Object.assign(fleet[type],{trait,description,tip,color,pvp:type!=='rv8a'});
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+  for(const spec of Object.values(fleet)){
+    const length=(spec.noseLength??10.4)+9.5;
+    spec.boomLevel=clamp(.38+1.45*spec.tip[0]/length,.60,1.18);
+    spec.boomRate=clamp(22/length,.76,1.15);
+  }
   // Linear temperature lapse below 11 km. Table interpolation is shared by all 120 Hz bodies.
   const rhoTable=[],soundTable=[];
   for(let h=0;h<=20000;h+=100){
@@ -153,7 +163,7 @@ const Flight = (() => {
       if(body.charge===0)body.empty=true;
     }
     body.deploy+=((engage?1:0)-body.deploy)*(1-Math.exp(-5*dt));
-    const flaps=(body.type==='tern'||body.type==='delta'||body.type==='wisp'||body.type==='tandem')?body.deploy:0,brake=(body.type==='osprey'||body.type==='nocturne')?body.deploy:0;
+    const flaps=(body.type==='tern'||body.type==='delta'||body.type==='wisp'||body.type==='tandem'||spec.landingFlaps)?body.deploy:0,brake=(body.type==='osprey'||body.type==='nocturne')?body.deploy:0;
     const fan=body.type==='manta'?body.deploy:0, sprint=body.type==='pulse'?body.deploy:0;
     const rho=density(body.pos[1]), pressureArea = .5*rho*speed*speed*spec.area;
     const separated = clamp((Math.abs(alpha)-spec.stall)/.25,0,1);
@@ -201,7 +211,7 @@ const Flight = (() => {
     const feedback=spec.unstable?-(2.9+spec.unstable)*sinAlpha*(1-body.deploy)/spec.pitch:0;
     controls[0]+=(clamp(command.pitch+body.pitchTrim+feedback,-1,1)-controls[0])*gain;controls[1]+=(-command.yaw-controls[1])*gain;controls[2]+=(-command.roll-controls[2])*gain;
     rates[0]+=dt*(authority*(controls[0]*spec.pitch*effective+(spec.unstable||-2.9)*sinAlpha)+body.vector*body.engine*(.15+.85*c.engine/100)*(body.type==='aurora'?4.6:7)-1.9*damping*oldPitch-oldYaw*oldRoll*(inertia[2]-inertia[1])/inertia[0]);
-    rates[1]+=dt*(authority*(controls[1]*(body.type==='gull'?.77+.89*body.deploy:body.type==='nocturne'?.77+.64*body.deploy:.77)*effective-1.9*slipSin)-1.75*damping*(body.type==='spire'?1+body.deploy:1)*oldYaw-oldRoll*oldPitch*(inertia[0]-inertia[2])/inertia[1]);
+    rates[1]+=dt*(authority*(controls[1]*(body.type==='gull'?.77+.89*body.deploy:body.type==='nocturne'?.77+.64*body.deploy:.77)*effective-1.9*slipSin)-1.75*damping*(body.type==='spire'||spec.yawDamper?1+body.deploy:1)*oldYaw-oldRoll*oldPitch*(inertia[0]-inertia[2])/inertia[1]);
     rates[2]+=dt*(authority*(controls[2]*spec.roll*(body.type==='swift'?1+.42*body.deploy:1)*effective+.5*slipSin+.008*(c.leftWing-c.rightWing)+(body.type==='petrel'||spec.rollCoupling?1.8*controls[1]*body.deploy:0))-1.65*damping*oldRoll-oldPitch*oldYaw*(inertia[1]-inertia[0])/inertia[2]);
     if(spec.vector===3){
       const power=dt*body.engine*(.15+.85*c.engine/100);

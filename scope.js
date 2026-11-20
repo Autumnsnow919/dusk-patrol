@@ -61,6 +61,10 @@ class DuelScope {
       const track=charge===undefined?'':charge===100?' LOCK':' '+charge+'%';
       labelRows.push([px,ly]);label((self?.star?.id===peer.id?'★ ':'')+peer.name+level+track+(selected?' · '+Math.round(Math.hypot(dx,altitude,dz))+' m':''),px+9,ly,col);
       if(selected){g.strokeStyle=gold;path([[px-10,py-4],[px-10,py+4],[px-5,py+4]]);path([[px+10,py+4],[px+10,py-4],[px+5,py-4]]);}
+      if(selected && charge===100){
+        g.strokeStyle=ink;g.lineWidth=3;circle(screen,5);
+        g.strokeStyle=gold;g.lineWidth=1;circle(screen,5);
+      }
     }
     if(!duel||!self)return;
     const reticle=room.weapon==='laser'?Sight.laser:Sight.profiles[room.weapon];

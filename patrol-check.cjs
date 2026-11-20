@@ -40,17 +40,19 @@ assert.notDeepEqual(packets[0].a,packets[2].a);
 for(let i=0;i<1800;i++){room.input(b,{weapon:'gun',controls:idle,dodge:true});room.tick(Flight.tick);assert(b.flareCells>=0 && b.flareCells<=12);}
 assert(room.events.filter(e=>e.kind==='flare').length>12);
 
-function movementPass(input){
+function movementPass(input,briefRoll=false,weapon='missile'){
   const pilot={id:'a',body:Flight.create('tern',[500,900,2000],0)};
   const target={id:'b',hp:100,life:1,body:Flight.create('pulse',[500,900,1600],.30)};
-  const bolt=Bolts.launch(1,pilot,target);
-  for(let i=0;i<300;i++){
+  const bolt=Bolts.launch(1,pilot,target,weapon);
+  for(let i=0;i<600;i++){
     Flight.step(target.body,input,Flight.tick);
+    if(briefRoll)target.body.controls[2]=bolt.stage===2 && bolt.elapsed<.025?.8:0;
     const result=Bolts.step(bolt,target,Flight.tick);if(result)return result;
   }
 }
 assert.equal(movementPass(idle),'hit');
 assert.equal(movementPass({...idle,pitch:1,roll:1,throttle:1,vector:true}),'fade');
+for(const weapon of ['missile','ribbon'])assert.equal(movementPass(idle,true,weapon),'hit');
 
 // A level crossing used to miss even with a full capture and no evasive input.
 for(const weapon of ['missile','ribbon']){
@@ -74,7 +76,7 @@ function checkTracks(weapon){
   pilot.shield=0;pilot.kit=weapon==='missile'?3:65;
   const peers=['a','b','c','d','outside'].map((id,i)=>{
     const peer=game.add(id,'tern');peer.shield=0;
-    peer.body=Flight.create('tern',[i===4?450:20*(i-1),1400,-900],0);
+    peer.body=Flight.create('tern',[i===4?450:15*(i-1),1400,-900-50*i],0);
     return peer;
   });
   function advance(count,target,fire=false){
@@ -91,6 +93,8 @@ function checkTracks(weapon){
   assert.equal(game.shots.length,0,'an input naming another contact must not spend a shot');
   advance(1,'d');
   assert.deepEqual(snapshot().marks,[['a',100],['b',100],['d',0]]);
+  game.input(pilot,{controls:idle,weapon,target:'b',fire:true,fireLife:peers[1].life-1});
+  game.tick(Flight.tick);assert.equal(game.shots.length,0);
   game.input(pilot,{controls:idle,weapon,target:'b',fire:true});
   assert.equal(snapshot().focus,'b','the sync that handles T must echo its new primary');
   game.tick(Flight.tick);
@@ -105,6 +109,19 @@ function checkTracks(weapon){
 }
 checkTracks('missile');
 checkTracks('ribbon');
+for(const [weapon,offset] of [['missile',60],['ribbon',38]]){
+  const game=new Arena(0),pilot=game.add('pilot','tern');
+  pilot.shield=0;pilot.kit=weapon==='ribbon'?65:3;
+  pilot.body=Flight.create('tern',[0,1500,0],0);
+  for(const [id,x,z] of [['outer',offset,-800],['left',-14,-900],['right',17,-1000],['center',0,-1100]]){
+    const p=game.add(id,'tern');p.shield=0;p.body=Flight.create('tern',[x,1500,z],0);
+  }
+  for(let i=0;i<240;i++){game.input(pilot,{controls:idle,weapon,target:'right',autoFocus:true});game.tick(Flight.tick);}
+  assert.equal(pilot.focus,'center','center wins regardless of join order');
+  assert(!pilot.marks.has('outer'),'the old outer edge is no longer inside the lock circle');
+  game.input(pilot,{controls:idle,weapon,target:'left',autoFocus:false});
+  assert.equal(pilot.focus,'left','T overrides automatic focus');
+}
 
 {
   const game=new Arena(0),pilot=game.add('pilot','tern'),peer=game.add('peer','tern');
@@ -140,10 +157,10 @@ function crossing(offset,defend,bystander=false,weapon='missile'){
   return {events:game.events,pilot,game};
 }
 const direct=crossing(0,false),miss=crossing(22,false),intercept=crossing(0,true),third=crossing(0,false,true);
-assert.equal(direct.pilot.hp,58);assert.equal(miss.pilot.hp,100);assert(miss.events.some(e=>e.kind==='fade'));
+assert.equal(direct.pilot.hp,0);assert.equal(direct.game.players.get('caster').kills,1);assert.equal(miss.pilot.hp,100);assert(miss.events.some(e=>e.kind==='fade'));
 assert.equal(intercept.pilot.hp,100);assert.equal(intercept.game.shots.length,0);assert.equal(intercept.events.filter(e=>e.kind==='intercept').length,1);
 assert(!intercept.events.some(e=>e.kind==='hit'));assert.equal(intercept.pilot.kills,0);
-assert.equal(third.pilot.hp,100);assert.equal(third.game.players.get('third').hp,58);
+assert.equal(third.pilot.hp,100);assert.equal(third.game.players.get('third').hp,0);
 const Outfit=require('./outfit.js');
 assert(Outfit.valid(65) && Outfit.cost(65)===7);
 assert(!Outfit.valid(66) && !Outfit.keys.includes('Digit7'));
@@ -168,7 +185,7 @@ for(const [weapon,range,expected] of [['missile',400,true],['ribbon',400,false],
     trial.input(p,{...command,fire:true});trial.tick(Flight.tick);assert.equal(trial.shots.length,0);
   }
 }
-assert.equal(crossing(0,false,false,'ribbon').pilot.hp,58);
+assert.equal(crossing(0,false,false,'ribbon').pilot.hp,0);
 const contact=require('./contacts.cjs');
 const sweeping={prev:[0,100,0],pos:[0,100,30],axes:contact.basisOf([0,0,1])};
 assert(contact.tracer(sweeping,[-20,100,15],[20,100,15])<1);
@@ -192,8 +209,11 @@ gallery.tick(Flight.tick);gallery.input(gunner,{controls:idle,weapon:'gun',fire:
 for(let i=0;i<45;i++)gallery.tick(Flight.tick);
 assert.equal(runner.hp,98);assert(runner.body.condition.rightWing<100);assert.equal(runner.body.condition.leftWing,100);
 gallery.remove(runner.id);
+gunner.heat=0;
+const previousCount=gunner.gunCount;
 const hold=()=>gallery.input(gunner,{controls:idle,target:null,weapon:'gun',fire:true});
-for(let i=0;i<380&&!gunner.hot;i++){hold();gallery.tick(Flight.tick);}
+for(let i=0;i<400&&!gunner.hot;i++){hold();gallery.tick(Flight.tick);}
+assert.equal(gunner.gunCount-previousCount,96);
 assert(gunner.hot);const stamp=gunner.lastGun;
 for(let i=0;i<160;i++){hold();gallery.tick(Flight.tick);}
 assert.equal(stamp,gunner.lastGun);assert(gunner.hot);
@@ -248,6 +268,7 @@ assert.equal(firstStar.beacons,1);assert.equal(crown.starId,'one');
 crown.damage(secondStar,firstStar,100);
 assert.equal(crown.starId,'two');assert.equal(secondStar.beacons,2);assert.equal(crown.starTime,0);
 async function network(){
+  await checkBufferedLaunch();
   const server=createServer();await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
   const base='http://127.0.0.1:'+server.address().port;
   async function post(path,data,token){
@@ -266,5 +287,31 @@ async function network(){
       assert.equal((await post('sync',state,second.token)).peers[0].name,'北辰');
     }
   }finally{await new Promise(ok=>server.close(ok));}
+}
+async function checkBufferedLaunch(){
+  const source=require('node:fs').readFileSync(require.resolve('./room.js'),'utf8');
+  const FlightRoom=require('node:vm').runInNewContext(source+';FlightRoom',{Sight,Flight,Outfit,performance});
+  const game=new Arena(0),pilot=game.add('pilot','tern'),client=new FlightRoom();
+  client.leave();client.mode='pvp';client.token='test';client.selectWeapon('missile');
+  for(const [id,x,z] of [['pilot',0,0],['A',-15,-650],['B',15,-650]]){
+    const p=game.players.get(id)??game.add(id,'tern');
+    p.shield=0;p.body=Flight.create('tern',[x,1300,z],0);
+  }
+  for(let i=0;i<140;i++){
+    game.input(pilot,{controls:idle,target:'A',weapon:'missile'});game.tick(Flight.tick);
+  }
+  client.request=async(_,command)=>{
+    assert(game.input(pilot,command));game.tick(Flight.tick);return game.snapshot(pilot,0);
+  };
+  client.target='A';
+  const now=performance.now();
+  await client.sync(null,now,idle,false);
+  assert.equal(client.marks.get('A'),100);
+  client.pressTrigger();client.cycleTarget();assert.equal(client.target,'B');
+  await client.sync(null,now+70,idle,false);
+  assert.equal(game.shots[0]?.to,'A');assert.equal(client.target,'B');
+  pilot.missileAt=0;
+  await client.sync(null,now+140,idle,true);
+  assert.equal(game.shots.length,1,'holding the key cannot launch at a different contact');
 }
 network().then(()=>console.log('PASS ring and range, continuous capture, warnings, moving shot, maneuver miss, decoy, assists and distinct names in both rooms')).catch(e=>{console.error(e);process.exitCode=1;});

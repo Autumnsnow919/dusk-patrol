@@ -112,6 +112,15 @@ let count=0;
 for(const type of Object.keys(Flight.fleet)){
   const all=[],mesh=buildPlane(type,all),cells=all.filter(c=>![12,13,14].includes(c.mat));
   assert(mesh.data.every(Number.isFinite));
+  const cloud=all.filter(c=>c.mat===14);
+  if(type==='rv8a'||type==='sail')assert.equal(cloud.length,0);
+  else{
+    assert.equal(cloud.length,2);
+    const rim=cloud[1][1],tip=rim.reduce((best,p)=>p[0]>best[0]?p:best);
+    assert(Math.abs(tip[0]-1.04*Flight.fleet[type].tip[0])<.001,type+' cloud span');
+    assert(Math.abs(tip[2]-Flight.fleet[type].tip[2])<1,type+' cloud follows wing sweep');
+    assert(mesh.data.length>mesh.solidEnd*10 && mesh.data[mesh.solidEnd*10+9]===14);
+  }
   for(const [controls,gear,deploy] of poses){
     const body=Flight.create(type);
     Object.assign(body,{controls,gear:type==='rv8a'?1:gear,deploy,propPhase:deploy*1.92,wheelPhase:deploy*1.35});
