@@ -43,7 +43,7 @@ function chooseAction(arena,drone,opponent,effects){
   const hurt=drone.hp<drone.lastHealth;
   drone.lastHealth=drone.hp;
   if(hurt && Outfit.has(drone.kit,'prism') && drone.prismAt<=now && drone.prismDue===null)drone.prismDue=now+.7;
-  const incoming=arena.shots.some(s=>s.to===drone.id && s.life===drone.life && !s.diverted);
+  const incoming=drone.flareCells>0 && arena.shots.some(s=>s.to===drone.id && s.life===drone.life && !s.diverted);
   if(!incoming)drone.alertAt=null;
   else if(drone.alertAt===null)drone.alertAt=now+(drone.fire?1.2:.65)+.12*drone.lane;
   input.dodge=incoming && now>=drone.alertAt && drone.shield<=now;

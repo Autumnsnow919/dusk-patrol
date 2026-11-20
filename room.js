@@ -1,5 +1,13 @@
 class FlightRoom {
   get combat() { return this.mode==='pvp'||this.mode==='pve'; }
+  flareReadout(incoming=false) {
+    const {flares,puffs,dodge}=this.self;
+    let state=incoming?'可按 X 释放':'就绪';
+    if(!flares)state='已耗尽';
+    else if(puffs)state='连放中';
+    else if(dodge>0)state='冷却 '+(Math.ceil(dodge*10)/10).toFixed(1)+' s';
+    return incoming?'来袭 · 热诱弹'+state:'热诱弹 '+flares+'/'+Outfit.flares.capacity+' · '+state;
+  }
   hostile(peer) { return this.mode==='pvp'||(this.mode==='pve'&&peer.id.startsWith('ai-')); }
   constructor() {
     this.peers=new Map();this.marks=new Map();this.shots=new Map();this.tracers=new Map();this.seenTracer=0; this.generation=0; this.status='单人飞行'; this.nextSync=0;

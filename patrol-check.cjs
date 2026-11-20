@@ -52,8 +52,41 @@ const packets=room.events.filter(e=>e.kind==='flare');
 assert.equal(packets.length,3);assert.equal(b.flareCells,9);
 assert(packets[0].at<packets[1].at && packets[1].at<packets[2].at);
 assert.notDeepEqual(packets[0].a,packets[2].a);
-for(let i=0;i<1800;i++){room.input(b,{weapon:'gun',controls:idle,dodge:true});room.tick(Flight.tick);assert(b.flareCells>=0 && b.flareCells<=12);}
-assert(room.events.filter(e=>e.kind==='flare').length>12);
+const sortie=b.life;
+// Repeated requests, including a loadout change, cannot refill the dispenser.
+for(let i=0;i<72/Flight.tick;i++){
+  room.input(b,{weapon:'gun',kit:1,controls:idle,dodge:true});
+  room.tick(Flight.tick);
+}
+assert.equal(b.life,sortie);
+const releases=room.events.filter(e=>e.kind==='flare');
+assert.equal(releases.length,12);
+for(let i=3;i<12;i+=3)assert(releases[i].at-releases[i-3].at>=8);
+const empty=room.snapshot(b,0).self;
+assert.equal(empty.flares,0);assert.equal(empty.puffs,0);assert.equal(empty.dodge,0);
+
+// Two ordinary launches against a level player. The first burst must leave a
+// window for the next incoming marker even if the defender keeps pressing X.
+{
+  const game=new Arena(0),sender=game.add('sender','tern'),receiver=game.add('receiver','tern');
+  sender.shield=receiver.shield=0;
+  sender.body=Flight.create('tern',[900,1450,1500],0);
+  receiver.body=Flight.create('tern',[900,1450,1100],0);
+  let cleared=false,followup=false,impact=false;
+  for(let i=0;i<10/Flight.tick && !impact;i++){
+    game.input(sender,{controls:idle,weapon:'missile',target:receiver.id,fire:true});
+    game.tick(Flight.tick);
+    const arriving=game.shots.find(s=>!s.diverted);
+    if(arriving){
+      game.input(receiver,{controls:idle,weapon:'gun',dodge:true});
+      if(!cleared){assert(arriving.diverted);cleared=true;}
+      else{assert(!arriving.diverted);followup=true;}
+    }
+    impact=game.events.some(e=>e.kind==='hit' && e.to===receiver.id);
+  }
+  assert(cleared && followup && impact,'the follow-up should reach the level player during cooldown');
+  assert.equal(receiver.flareCells,9);
+}
 
 function movementPass(input,briefRoll=false,weapon='missile'){
   const pilot={id:'a',body:Flight.create('tern',[500,900,2000],0)};
@@ -316,6 +349,8 @@ assert.equal(bridgeContact,'fade');
 const helper=room.add('c','heron','苍鹭');b.shield=0;
 room.damage(helper,b,11);room.damage(a,b,100);
 assert.equal(helper.assists,1);assert.equal(a.kills,1);
+tick(270);
+assert.equal(b.life,sortie+1);assert.equal(b.flareCells,12);assert.equal(b.puffs,0);
 const crown=new Arena(0,'crown'),firstStar=crown.add('one'),secondStar=crown.add('two');
 firstStar.shield=secondStar.shield=0;
 for(let i=0;i<970;i++)crown.tick(Flight.tick);
@@ -368,5 +403,8 @@ async function checkBufferedLaunch(){
   pilot.missileAt=0;
   await client.sync(null,now+140,idle,true);
   assert.equal(game.shots.length,1,'holding the key cannot launch at a different contact');
+  client.self=empty;
+  assert.equal(client.flareReadout(),'热诱弹 0/12 · 已耗尽');
+  assert.equal(client.flareReadout(true),'来袭 · 热诱弹已耗尽');
 }
 network().then(()=>console.log('PASS ring and range, continuous capture, warnings, moving shot, maneuver miss, decoy, assists and distinct names in both rooms')).catch(e=>{console.error(e);process.exitCode=1;});

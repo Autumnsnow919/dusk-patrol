@@ -115,7 +115,7 @@ class DuelScope {
       }
     }
     if(self.incoming||self.warned){
-      const txt=self.incoming?'来袭  ·  X 热诱弹':'锁定预警';
+      const txt=self.incoming?room.flareReadout(true):'锁定预警';
       label(txt,seated?w-108:w/2-g.measureText(txt).width/2,seated?ry+R+45:h*.21,self.incoming?red:gold);
     }
     if(!room.events.length)return;

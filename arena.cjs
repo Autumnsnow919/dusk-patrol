@@ -47,7 +47,7 @@ class Arena {
   }
   reset(player) {
     player.marks=new Map();player.focus=null;player.lastFired=null;
-    Object.assign(player,{body:spawn(player.slot,player.type,this.mission&&!player.bot),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:12,flareChargeAt:0,
+    Object.assign(player,{body:spawn(player.slot,player.type,this.mission&&!player.bot),hp:100,life:player.life+1,shield:this.time+2.4,revive:0,lastSummary:null,priorPos:[0,0,0],puffs:0,puffAt:0,flareCells:Outfit.flares.capacity,
       tags:new Map(),acquire:0,controls:silent,target:null,laser:0,gunAt:0,tap:false,gunCount:0,heat:0,hot:false,lastGun:-10,missileAt:0,ribbonAt:0,laserAt:0,weapon:Outfit.first(player.kit),pulseAt:0,echo:null,echoAt:0,arcAt:0,glyphAt:0,glyph:null,prismAt:0,prismUntil:0,fire:false,dodgeAt:0,divertUntil:0,lastInput:-1});
   }
   remove(id) {
@@ -140,16 +140,15 @@ class Arena {
     if(selectionChanged && equipped && Sight.profiles[player.weapon] && player.refitAt<=this.time && player.shield<=this.time)
       this.scan(player,Sight.profiles[player.weapon],0);
     if(data.dodge===true && this.time>=player.dodgeAt && !player.puffs && player.flareCells){
-      player.puffs=Math.min(3,player.flareCells);
-      player.dodgeAt=this.time+1.55;
+      player.puffs=Math.min(Outfit.flares.burst,player.flareCells);
+      player.dodgeAt=this.time+Outfit.flares.cooldown;
       this.dispense(player);
     }
     return true;
   }
   dispense(player){
     const b=player.body,{r,f,u}=b.basis;
-    player.flareCells--;player.puffs--;player.puffAt=this.time+.24;
-    if(!player.flareChargeAt)player.flareChargeAt=this.time+4;
+    player.flareCells--;player.puffs--;player.puffAt=this.time+Outfit.flares.interval;
     const side=player.flareCells%2?1:-1;
     const start=b.pos.map((v,i)=>v+side*r[i]*2-7*f[i]);
     const end=start.map((v,i)=>v+b.vel[i]*.19+r[i]*side*49-f[i]*40-u[i]*18);
@@ -241,10 +240,6 @@ class Arena {
     const hits=[];
     for(const player of this.players.values()) {
       if(player.hp && player.puffs && player.puffAt<=this.time)this.dispense(player);
-      if(player.flareChargeAt && player.flareChargeAt<=this.time){
-        player.flareCells=Math.min(12,player.flareCells+1);
-        player.flareChargeAt=player.flareCells<12?this.time+4:0;
-      }
       if(player.hot || this.time-player.lastGun>.28)player.heat=Math.max(0,player.heat-dt*.32);
       if(player.hot && player.heat<=.2)player.hot=false;
       let other=this.players.get(player.target);

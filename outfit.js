@@ -1,5 +1,6 @@
 const Outfit = (() => {
   const budget=7;
+  const flares={capacity:12,burst:3,cooldown:8,interval:.24};
   const items=[
     {id:'gun',name:'机炮',cost:2,tip:'对准机头自由射击，连射过热后需冷却'},
     {id:'missile',name:'燕尾格斗弹',cost:4,tip:'近距宽圈，捕获快，冷却短'},
@@ -22,6 +23,6 @@ const Outfit = (() => {
   function describe(mask,active){
     return items.flatMap((item,i)=>has(mask,item.id)?[(active===item.id?'▸ ':'')+keyLabel(i)+' '+item.name]:[]).join('　');
   }
-  return {items,keys,keyLabel,budget,has,cost,valid,first,maskOf,describe,standard:3};
+  return {items,keys,keyLabel,budget,flares,has,cost,valid,first,maskOf,describe,standard:3};
 })();
 if(typeof module!=='undefined')module.exports=Outfit;

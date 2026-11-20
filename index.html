@@ -1849,13 +1849,13 @@ const PLANE = {
       const laserHint=!tracked?'待选目标':distance>Sight.laser.reach?'射程外':self.lock?'照射 '+Math.floor(self.lock*100)+'%':'对入圆圈 · 按住 J';
       const missileReadout=!tracked?'等待目标':distance>(missile?.reach||0)?'超出捕获距离':distance<missile?.inner?'近距盲区':
         charge===100?(self.cool?'已锁定':'已锁定 · J 发射'):charge?'捕获 '+charge+'%':'将目标移入圈内';
-      const warning=now<noticeUntil&&notice==='机炮拦截成功'?notice:self.revive?'击毁 · '+self.revive.toFixed(1)+' s 后重生':self.shield?'出生保护':self.incoming?'来袭 · X 热诱弹':self.warned?'锁定预警':self.prism?'镜阵展开':self.diverted?'诱偏成功':(!body.grounded && !runway && S.agl<45)||Math.hypot(S.pos[0]-900,S.pos[2]-1500)>Lake.arenaRadius-1200 || S.pos[1]>Lake.arenaCeiling-350?'接近赛场边界':'';
+      const warning=now<noticeUntil&&notice==='机炮拦截成功'?notice:self.revive?'击毁 · '+self.revive.toFixed(1)+' s 后重生':self.shield?'出生保护':self.incoming?room.flareReadout(true):self.warned?'锁定预警':self.prism?'镜阵展开':self.diverted?'诱偏成功':(!body.grounded && !runway && S.agl<45)||Math.hypot(S.pos[0]-900,S.pos[2]-1500)>Lake.arenaRadius-1200 || S.pos[1]>Lake.arenaCeiling-350?'接近赛场边界':'';
       const changing=self.weapon!==room.weapon;
       const status=room.pendingKit!==null?'提交配装中':self.refit?'换装 '+self.refit.toFixed(1)+'s':changing?'切换中':
         self.cool?'冷却 '+self.cool.toFixed(1)+'s':self.hot&&room.weapon==='gun'||missile||self.revive||self.shield?'':'就绪';
       $('combat-state').textContent=warning+'　'+(Outfit.items.find(item=>item.id===room.weapon).name+(changing?'':room.weapon==='laser'?' · '+laserHint:missile?' · '+missileReadout+'　跟踪 '+room.marks.size+'/'+Sight.trackSlots:room.weapon==='gun'&&tracked&&distance<=620?' · ◇ 预瞄':''))+
         (room.weapon==='gun'?'　'+(self.hot?'过热锁止 · 冷却中 ':'炮温 ')+Math.round(self.heat*100)+'%':'')+
-        (status?' · '+status:'')+'　热诱弹 '+self.flares+'/12 · '+(self.puffs?'连放中':self.dodge?self.dodge.toFixed(1)+'s':self.flares?'就绪':'补充中');
+        (status?' · '+status:'')+'　'+room.flareReadout();
     }else $('combat-state').textContent=(body.type==='kite'||body.type==='rv8a')?'迎角 '+Math.round(body.alpha*180/Math.PI)+'°　升降率 '+S.vs.toFixed(1)+' m/s　滚转 '+Math.round(-body.rates[2]*180/Math.PI)+'°/s':'';
     $('perf').textContent=displayPerf?qualityNames[quality]+'　'+Math.round(1000/frameMs)+' FPS　'+frameMs.toFixed(1)+' ms　'+IW+'×'+IH+'　地景 '+landW+'×'+landH:'';
     const watched=room.peers.get(watchId),type=watched?.type||body.type,spec=Flight.fleet[type];
@@ -1913,7 +1913,6 @@ const PLANE = {
     update(dt); render();
     if(flying) {
       frameMs+=.06*(clamp(raw*1000,1,250)-frameMs);
-      if(keys.has('KeyX')&&room.combat)room.dodge=true;
       room.sync(body,now,wireControls,keys.has('KeyJ'));showReadout(now);audio.update(body,S,cam,room,keys.has('KeyZ'),keys.has('KeyJ')&&room.weapon==='gun');
       if(onlineSortie&&!room.token){park();$('launch-note').textContent='房间连接已过期，请重新加入。';}
       else scope.draw(now,room,body,cam,Lake.sites[chart.selected]);
