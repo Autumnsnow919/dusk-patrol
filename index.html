@@ -9,6 +9,7 @@
 <script src="airfields.js"></script>
 <script src="flight.js"></script>
 <script src="airframes.js"></script>
+<script src="cockpit.js"></script>
 <script src="lake.js"></script>
 <script src="outfit.js"></script>
 <script src="chart.js"></script>
@@ -149,6 +150,7 @@ const districtRows=Math.ceil(Lake.batches.length/4);
 const AIR_SHADOW = `
 uniform sampler2D uAircraftAtlas;
 uniform vec3 uCasters[8],uLightRight,uLightUp,uCastLight;
+uniform vec4 uCastBounds;
 uniform int uCasterCount,uDistrictCount;
 uniform vec4 uDistricts[4];uniform vec2 uDistrictTiles[4];uniform sampler2D uDistrictAtlas;
 float landmarkShadow(vec3 p){
@@ -168,12 +170,15 @@ float coverage(vec2 uv,float depth){
   return m.r*smoothstep(-.014,.006,m.g/max(m.r,.001)-depth);
 }
 float planeShadow(vec3 point){
+  if(uCasterCount==0)return 1.;
+  vec3 lightPos=vec3(dot(point,uLightRight),dot(point,uLightUp),dot(point,uCastLight));
+  if(any(lessThan(lightPos.xy,uCastBounds.xy))||any(greaterThan(lightPos.xy,uCastBounds.zw)))return 1.;
   float shade=0.;
   for(int i=0;i<uCasterCount;i++){
-    vec3 rel=point-uCasters[i];
-    float along=dot(rel,uCastLight);
+    vec3 rel=lightPos-uCasters[i];
+    float along=rel.z;
     if(along>24. || along< -990.)continue;
-    vec2 q=vec2(dot(rel,uLightRight),dot(rel,uLightUp))/52.+.5;
+    vec2 q=rel.xy/52.+.5;
     if(any(lessThan(q,vec2(.04)))||any(greaterThan(q,vec2(.96))))continue;
     vec2 atlas=(q+vec2(i%4,i/4))/vec2(4.,2.);
     vec2 d=vec2(1./512.,1./256.)*clamp(.65-along*.012,.65,5.);
@@ -679,372 +684,6 @@ const PLANE = {
 
 
 
-// ───────────────────────── cockpit ─────────────────────────
-// Hand-plotted pixel panel and head-up display: every reading is driven by the flight state.
-const Cockpit = (function () {
-  let steadyPanel=null,radarScan=null,radarTime=-1;
-  let W = 0, H = 0, ctx = null, img = null, out = null, panel = null, frame = null, T = null, CL = null;
-  let cx = 0, y0 = 0, PH = 0, wide = false, drawn = false;
-  const C = (hex, a = 255) => { const n = parseInt(hex.slice(1), 16); return ((a << 24) | ((n & 255) << 16) | (n & 0xff00) | (n >> 16 & 255)) >>> 0; };
-  const K = {
-    ink: C('#15101e'), f0: C('#1b1f2e'), f1: C('#272e44'), f2: C('#3a4764'), fHi: C('#7088ac'),
-    l0: C('#12101a'), l1: C('#1d1b29'), l2: C('#2b2a3b'), lHi: C('#4b4d68'),
-    p0: C('#13212a'), p1: C('#1b2f38'), p2: C('#223b45'), plate: C('#284650'), plateHi: C('#3f6a72'), plateLo: C('#111d24'),
-    b0: C('#2a3046'), b1: C('#535d78'), b2: C('#8f9bb4'), bHi: C('#edf2fa'),
-    dial: C('#0e131b'), dial2: C('#18212d'), tick: C('#efe3c6'), dim: C('#8d897f'),
-    needle: C('#ff6b3a'), needleDk: C('#9a2c1c'), white: C('#fff6e0'),
-    sky: C('#58a6e4'), sky2: C('#3d82c6'), gnd: C('#b06c3c'), gnd2: C('#84492a'),
-    a0: C('#170a04'), a1: C('#4d2409'), a2: C('#a45410'), a3: C('#ee9820'), a4: C('#ffdc7a'),
-    green: C('#5fd884'), greenDk: C('#1f4a34'), red: C('#ff5440'), redDk: C('#4e1a1c'), amber: C('#ffb62e'), amberDk: C('#4e3414'),
-    arcG: C('#58c878'), arcY: C('#f0c040'), arcR: C('#f04a3a'),
-    hud: C('#8cffa6'), hudWarn: C('#ffd25a'), glass: C('#b8ffd8', 13), glassEdge: C('#d8fff0', 70),
-  };
-  const FONT = {
-    '0': '111101101101111', '1': '010110010010111', '2': '111001111100111', '3': '111001111001111', '4': '101101111001001',
-    '5': '111100111001111', '6': '111100111101111', '7': '111001010010010', '8': '111101111101111', '9': '111101111001111',
-    'A': '010101111101101', 'B': '110101110101110', 'C': '011100100100011', 'D': '110101101101110', 'E': '111100110100111',
-    'G': '011100101101011', 'L': '100100100100111', 'N': '110101101101101', 'O': '010101101101010', 'P': '110101110100100',
-    'R': '110101110101101', 'S': '011100010001110', 'T': '111010010010010', 'U': '101101101101111', 'W': '101101111111101',
-    'F': '111100110100100', 'M': '101111111101101', 'X': '101101010101101',
-    '-': '000000111000000', '.': '000000000000010', ' ': '000000000000000',
-  };
-
-  // ── plotting ──
-  function px(x, y, c) { x |= 0; y |= 0; if (x < 0 || y < 0 || x >= W || y >= H) return; if (CL && (x < CL[0] || y < CL[1] || x > CL[2] || y > CL[3])) return; T[y * W + x] = c; }
-  function rect(x, y, w, h, c) { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) px(x + i, y + j, c); }
-  function line(x0, y0_, x1, y1, c, dash = 0) {
-    x0 = Math.round(x0); y0_ = Math.round(y0_); x1 = Math.round(x1); y1 = Math.round(y1);
-    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0_), sx = x0 < x1 ? 1 : -1, sy = y0_ < y1 ? 1 : -1; let e = dx + dy;
-    for (let n = 0; n < 600; n++) { if (!dash || (n % (dash * 2)) < dash) px(x0, y0_, c); if (x0 === x1 && y0_ === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0_ += sy; } }
-  }
-  function disc(x, y, r, c) { const rr = r * r + r * 0.8; for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) if (i * i + j * j <= rr) px(x + i, y + j, c); }
-  function glyph(ch, x, y, c) { const g = FONT[ch]; if (!g) return 4; for (let j = 0; j < 5; j++) for (let i = 0; i < 3; i++) if (g[j * 3 + i] === '1') px(x + i, y + j, c); return 4; }
-  function text(s, x, y, c) { for (const ch of String(s)) x += glyph(ch, x, y, c); }
-  const textW = s => String(s).length * 4 - 1;
-  const pol = (x, y, a, r) => [x + Math.sin(a) * r, y - Math.cos(a) * r];
-  const rad = d => d * Math.PI / 180;
-  const hash = (x, y) => { let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
-
-  // steel bezel + dark face
-  function bezel(x, y, r, face = K.dial) {
-    const R = r + 3;
-    for (let j = -R - 1; j <= R + 1; j++) for (let i = -R - 1; i <= R + 1; i++) {
-      const d = Math.sqrt(i * i + j * j);
-      if (d > R + 0.9) continue;
-      if (d > R - 0.1) { px(x + i, y + j, K.ink); continue; }
-      const t = (-i - j) / (d * 1.4142 + 1e-6);
-      if (d > r + 0.5) { px(x + i, y + j, t > 0.62 ? K.bHi : t > 0.05 ? K.b2 : t > -0.55 ? K.b1 : K.b0); continue; }
-      px(x + i, y + j, d > r - 0.9 ? (t > 0.1 ? K.ink : K.dial2) : face);
-    }
-  }
-  function ticks(x, y, r, a0, a1, n, len, c, every = 1, len2 = len) {
-    for (let k = 0; k <= n; k++) {
-      const a = a0 + (a1 - a0) * k / n, L = k % every === 0 ? len : len2;
-      const [xa, ya] = pol(x, y, a, r - 1), [xb, yb] = pol(x, y, a, r - 1 - L);
-      line(xa, ya, xb, yb, k % every === 0 ? c : K.dim);
-    }
-  }
-  function arc(x, y, r, a0, a1, c) { for (let a = a0; a <= a1; a += 0.5 / r) { const [xa, ya] = pol(x, y, a, r); px(Math.round(xa), Math.round(ya), c); } }
-  function needle(x, y, a, len, c = K.needle, tail = 0) {
-    const [xb, yb] = pol(x, y, a, len), [xt, yt] = pol(x, y, a + Math.PI, tail);
-    line(xt + 1, yt + 1, xb + 1, yb + 1, K.ink);
-    line(xt, yt, xb, yb, c);
-  }
-  function cap(x, y) { disc(x, y, 2, K.b1); px(x - 1, y - 1, K.bHi); px(x, y, K.b2); }
-  function plate(x, y, w, h) {
-    rect(x, y, w, h, K.plate);
-    rect(x, y, w, 1, K.plateHi); rect(x, y, 1, h, K.plateHi); rect(x, y + h - 1, w, 1, K.plateLo); rect(x + w - 1, y, 1, h, K.plateLo);
-    px(x, y, K.p1); px(x + w - 1, y, K.p1); px(x, y + h - 1, K.p1); px(x + w - 1, y + h - 1, K.p1);
-    for (let j = 2; j < h - 2; j++) for (let i = 2; i < w - 2; i++) { const r = hash(x + i, y + j); if (r > 0.965) px(x + i, y + j, K.plateHi); else if (r < 0.05) px(x + i, y + j, K.p2); }
-    for (const [sx, sy] of [[4, 4], [w - 5, 4], [4, h - 5], [w - 5, h - 5]]) { px(x + sx, y + sy, K.b1); px(x + sx - 1, y + sy - 1, K.bHi); px(x + sx + 1, y + sy + 1, K.plateLo); }
-  }
-
-  // gauge positions (set in layout)
-  let G = {};
-  // Expanded high-speed sector; preserve extra needle travel for approach speeds.
-  const asiA=v=>rad(-140+Math.min(800,v)*.21+Math.max(0,Math.min(1600,v-800))*.07);
-  function layout() {
-    cx = W >> 1; PH = Math.max(132, Math.min(158, Math.round(H * 0.43))); y0 = H - PH; wide = W >= 392;
-    G = {
-      asi: [cx - 60, y0 + 50, 21], ai: [cx, y0 + 50, 26], alt: [cx + 60, y0 + 50, 21],
-      tc: [cx - 52, y0 + 106, 16], hi: [cx, y0 + 106, 18], vsi: [cx + 52, y0 + 106, 16],
-      scope: [cx - 144, y0 + 62, 30], tach: [cx + 123, y0 + 42, 13], thr: [cx + 161, y0 + 42, 13], clock: [cx + 122, y0 + 84, 10],
-      lamps: [cx + 146, y0 + 74], lever: [cx + 162, y0 + 90],
-    };
-  }
-  const shieldY = x => { const t = (x - cx) / (W / 2), d = Math.abs(x - cx); const hump = d < 62 ? 1 : d > 112 ? 0 : 0.5 + 0.5 * Math.cos((d - 62) / 50 * Math.PI); return Math.round(y0 + 10 * t * t - 11 * hump); };
-
-  function buildFrame() {
-    T = frame; frame.fill(0);
-    // sheen on the canopy
-    for (let y = 0; y < y0 + 12; y++) for (let x = 0; x < W; x++) {
-      const d = (x + y * 0.62) / W;
-      const band = (d > 0.20 && d < 0.235) || (d > 0.26 && d < 0.272) || (d > 1.02 && d < 1.07) || (d > 1.10 && d < 1.118);
-      if (band) frame[y * W + x] = C('#fff2d0', 26);
-    }
-    // canopy bow
-    for (let x = 0; x < W; x++) {
-      const t = (x - cx) / (W / 2), yb = 9 + Math.round(17 * t * t);
-      for (let y = 0; y <= yb; y++) px(x, y, y < 3 ? K.f0 : y > yb - 1 ? K.ink : y > yb - 2 ? K.fHi : y > yb - 4 ? K.f2 : K.f1);
-      if ((x - cx) % 26 === 0) { px(x, yb - 6, K.fHi); px(x, yb - 5, K.f0); }
-    }
-    // side rails
-    for (let y = 0; y < H; y++) {
-      const k = Math.min(1, y / y0), w = Math.round(9 + 30 * Math.pow(k, 1.25));
-      for (let i = 0; i <= w; i++) {
-        const c = i > w - 1 ? K.ink : i > w - 2 ? K.fHi : i > w - 5 ? K.f2 : i < 3 ? K.f0 : K.f1;
-        px(i, y, c); px(W - 1 - i, y, i > w - 1 ? K.ink : i > w - 2 ? K.f2 : i > w - 5 ? K.f1 : K.f0);
-      }
-      if (y % 22 === 11) { px(w - 8, y, K.fHi); px(w - 8, y + 1, K.f0); px(W - 1 - w + 8, y, K.f2); px(W - 1 - w + 8, y + 1, K.ink); }
-    }
-  }
-
-  function buildPanel() {
-    T = panel; panel.fill(0);
-    for (let x = 0; x < W; x++) {
-      const ys = shieldY(x);
-      for (let y = ys; y < H; y++) {
-        const d = y - ys; let c;
-        if (d === 0) c = K.lHi;
-        else if (d === 1) c = K.l2;
-        else if (d < 8) c = (d === 4 && x % 6 === 0) ? K.l2 : K.l1;
-        else if (d === 8) c = K.l0;
-        else if (d === 9) c = K.ink;
-        else if (d < 13) c = K.p0;
-        else { const r = hash(x, y); c = r > 0.975 ? K.p2 : r < 0.04 ? K.p0 : K.p1; if (y > H - 10 && ((x + y) & 1)) c = K.p0; }
-        px(x, y, c);
-      }
-    }
-    // centre plate with the six flight instruments
-    plate(cx - 90, y0 + 16, 181, PH - 20);
-    let [x, y, r] = G.asi; bezel(x, y, r);
-    arc(x, y, r - 1, asiA(300), asiA(800), K.arcG); arc(x, y, r - 1, asiA(800), asiA(1100), K.arcY);
-    arc(x, y, r - 1, asiA(2100), asiA(2380), K.arcR); arc(x, y, r - 2, asiA(2100), asiA(2380), K.arcR);
-    for(let v=0;v<=2400;v+=v<800?100:200){
-      const a=asiA(v),edge=pol(x,y,a,r-1),inner=pol(x,y,a,r-(v%400===0?5:3));line(...edge,...inner,K.tick);
-    }
-    for (const v of [0,400,800,1600,2400]) { const lab = String(v/100), [tx, ty] = pol(x, y, asiA(v), r - 10); text(lab, Math.round(tx) - (textW(lab) >> 1), Math.round(ty) - 2, K.tick); }
-    [x, y, r] = G.alt; bezel(x, y, r);
-    ticks(x, y, r, 0, Math.PI * 2, 50, 4, K.tick, 5, 1);
-    for (let k = 0; k < 10; k++) { const [tx, ty] = pol(x, y, k / 10 * Math.PI * 2, r - 8); text(k, Math.round(tx) - 1, Math.round(ty) - 2, k % 5 === 0 ? K.tick : K.dim); }
-    [x, y, r] = G.ai; bezel(x, y, r);
-    for (const d of [-60, -30, -20, -10, 0, 10, 20, 30, 60]) { const [xa, ya] = pol(x, y, rad(d), r - 1), [xb, yb] = pol(x, y, rad(d), r - (d % 30 === 0 ? 4 : 3)); line(xa, ya, xb, yb, d === 0 ? K.needle : K.tick); }
-    [x, y, r] = G.tc; bezel(x, y, r);
-    for (const d of [-90, -70, 70, 90]) { const [xa, ya] = pol(x, y, rad(d), r - 1), [xb, yb] = pol(x, y, rad(d), r - 4); line(xa, ya, xb, yb, K.tick); }
-    rect(x - 9, y + 8, 19, 5, K.ink); rect(x - 8, y + 9, 17, 3, K.dial2); rect(x - 2, y + 8, 1, 5, K.dim); rect(x + 2, y + 8, 1, 5, K.dim);
-    [x, y, r] = G.hi; bezel(x, y, r);
-    [x, y, r] = G.vsi; bezel(x, y, r);
-    ticks(x, y, r, rad(-90 - 120), rad(-90 + 120), 12, 4, K.tick, 3, 2);
-    arc(x, y, r - 1, rad(-90 + 80), rad(-90 + 120), K.arcG); arc(x, y, r - 1, rad(-90 - 120), rad(-90 - 80), K.arcY);
-    text('0', x - 10, y - 2, K.tick);
-    if (wide) {
-      plate(cx - 190, y0 + 22, 93, PH - 30);
-      [x, y, r] = G.scope; bezel(x, y, r, K.a0);
-      for (const kx of [cx - 164, cx - 124]) { disc(kx, y0 + 112, 5, K.ink); disc(kx, y0 + 112, 4, K.f2); disc(kx - 1, y0 + 111, 2, K.fHi); px(kx, y0 + 108, K.white); }
-      rect(cx - 152, y0 + 108, 17, 9, K.ink); rect(cx - 151, y0 + 109, 15, 7, K.a0);
-      plate(cx + 98, y0 + 22, 93, PH - 30);
-      [x, y, r] = G.tach; bezel(x, y, r); ticks(x, y, r, rad(-130), rad(130), 8, 3, K.tick, 2, 2); arc(x, y, r - 1, rad(95), rad(130), K.arcR);
-      [x, y, r] = G.thr; bezel(x, y, r); ticks(x, y, r, rad(-130), rad(130), 8, 3, K.tick, 4, 2); arc(x, y, r - 1, rad(40), rad(130), K.arcY);
-      [x, y, r] = G.clock; bezel(x, y, r, C('#efe3c6')); for (let k = 0; k < 12; k++) { const [tx, ty] = pol(x, y, k / 12 * Math.PI * 2, r - 2); px(Math.round(tx), Math.round(ty), K.ink); }
-      // throttle slot
-      const [lx, ly] = G.lever; rect(lx - 4, ly - 2, 9, 40, K.ink); rect(lx - 3, ly - 1, 7, 38, K.p0); rect(lx - 1, ly + 1, 3, 34, K.dial);
-      for (let k = 0; k < 5; k++) { px(lx - 6, ly + 3 + k * 7, K.dim); px(lx + 6, ly + 3 + k * 7, K.dim); }
-      // lamp sockets
-      const [mx, my] = G.lamps; for (let k = 0; k < 3; k++) disc(mx + k * 11 - 16, my + 34, 4, K.ink);
-    }
-  }
-
-  function resize(canvas, w, h) {
-    W = w; H = h; ctx = canvas.getContext('2d'); img = ctx.createImageData(W, H);
-    out = new Uint32Array(img.data.buffer); panel = new Uint32Array(W * H); frame = new Uint32Array(W * H);
-    layout(); buildFrame(); buildPanel();
-    radarTime=-1;radarScan=null;steadyPanel=frame.slice();
-    for(let i=0;i<panel.length;i++)if(panel[i])steadyPanel[i]=panel[i];
-    drawn = false;
-  }
-
-  // ── head-up display: collimated, so the ladder sits on the real horizon ──
-  function hud(S, env, oy, live) {
-    const hx0 = cx - Math.min(62, (W >> 1) - 46), hx1 = W - 1 - hx0, hy1 = shieldY(cx) - 2 + oy, hy0 = Math.max(30 + oy, hy1 - 132);
-    // combiner glass and its two posts
-    for (let y = hy0; y <= hy1; y++) for (let x = hx0; x <= hx1; x++) if (y >= 0 && y < H && !out[y * W + x]) out[y * W + x] = K.glass;
-    rect(hx0, hy0, hx1 - hx0 + 1, 1, K.glassEdge);
-    for (const xx of [hx0 - 2, hx1 + 1]) { rect(xx, hy0 + 6, 2, hy1 - hy0 - 4, K.f0); rect(xx + (xx < cx ? 1 : 0), hy0 + 6, 1, hy1 - hy0 - 4, K.f2); px(xx, hy0 + 5, K.fHi); px(xx + 1, hy0 + 5, K.fHi); }
-    if (!live) return;
-    const cam = env.cam, B = cam.B, tanF = Math.tan(cam.fov / 2), sc = H / 2 / tanF, g = K.hud;
-    const proj = (az, el) => {
-      const ce = Math.cos(el), d0 = Math.sin(az) * ce, d1 = Math.sin(el), d2 = -Math.cos(az) * ce;
-      const zc = d0 * B.f[0] + d1 * B.f[1] + d2 * B.f[2]; if (zc < 0.25) return null;
-      return [W / 2 + (d0 * B.r[0] + d1 * B.r[1] + d2 * B.r[2]) / zc * sc, H / 2 - (d0 * B.u[0] + d1 * B.u[1] + d2 * B.u[2]) / zc * sc + oy];
-    };
-    CL = [hx0 + 2, hy0 + 16, hx1 - 2, hy1 - 2];
-    // pitch ladder
-    for (let e = -80; e <= 80; e += 10) {
-      const el = rad(e), a0 = rad(e === 0 ? 3.2 : 2.6), a1 = rad(e === 0 ? 17 : 8.5);
-      for (const sgn of [-1, 1]) {
-        const p = proj(S.yaw + sgn * a0, el), q = proj(S.yaw + sgn * a1, el);
-        if (!p || !q) continue;
-        line(p[0], p[1], q[0], q[1], g, e < 0 ? 2 : 0);
-        if (e !== 0) { const t = proj(S.yaw + sgn * a1, el - Math.sign(e) * rad(1.6)); if (t) line(q[0], q[1], t[0], t[1], g); }
-        if (e !== 0 && sgn > 0) text(Math.abs(e), Math.round(q[0]) + 3, Math.round(q[1]) - 2, g);
-      }
-    }
-    // where the nose points
-    const n = proj(S.yaw, S.pitch);
-    if (n) { const nx = Math.round(n[0]), ny = Math.round(n[1]); arc(nx, ny, 3, 0, Math.PI * 2, g); rect(nx - 9, ny, 5, 1, g); rect(nx + 5, ny, 5, 1, g); rect(nx, ny - 6, 1, 3, g); }
-    CL = [hx0 + 1, hy0 + 1, hx1 - 1, hy1 - 1];
-    // heading tape
-    let hd = (S.yaw * 180 / Math.PI) % 360; if (hd < 0) hd += 360;
-    const names = ['N', '03', '06', 'E', '12', '15', 'S', '21', '24', 'W', '30', '33'];
-    for (let b = 0; b < 360; b += 10) {
-      const d = ((b - hd + 540) % 360) - 180, xx = Math.round(cx + d * 1.3);
-      if (xx < hx0 + 6 || xx > hx1 - 6) continue;
-      if (b % 30 === 0) { const nm = names[b / 30]; text(nm, xx - (textW(nm) >> 1), hy0 + 3, g); rect(xx, hy0 + 10, 1, 3, g); } else rect(xx, hy0 + 11, 1, 2, g);
-    }
-    px(cx, hy0 + 14, g); rect(cx - 1, hy0 + 15, 3, 1, g); rect(cx - 2, hy0 + 16, 5, 1, g);
-    // speed, height and the small print
-    const my = Math.round((hy0 + hy1) / 2) + 6;
-    const box = (x, s, label) => { const w = 23; rect(x, my - 3, w, 1, g); rect(x, my + 7, w, 1, g); rect(x, my - 3, 1, 11, g); rect(x + w - 1, my - 3, 1, 11, g); text(s, x + w - 3 - textW(s), my, g); text(label, x + 1, my - 10, g); };
-    box(hx0 + 4, String(Math.round(S.speed * 3.6)), 'SPD');
-    box(hx1 - 26, String(Math.round(S.pos[1] / 10) * 10), 'ALT');
-    text('G ' + S.g.toFixed(1), hx0 + 5, hy1 - 9, g);
-    const ragl = Math.round(S.agl / 10) * 10; if (ragl < 2000) { const s = 'R ' + ragl; text(s, hx1 - 4 - textW(s), hy1 - 9, g); }
-    if (S.boost > 0.3) text('AB', hx0 + 5, my + 11, K.hudWarn);
-    if (S.agl < 60 && S.vs < -4 && (S.time * 3 % 1) < 0.6) { const s = 'PULL UP'; text(s, cx - (textW(s) >> 1), my + 22, K.hudWarn); }
-    if (S.stalled) text('STALL', cx - 10, hy1 - 9, K.hudWarn);
-    CL = null;
-  }
-
-  function draw(k, S, inp, env) {
-    if (!ctx) return;
-    if (k <= 0.001) { if (drawn) { ctx.clearRect(0, 0, W, H); drawn = false; } return; }
-    drawn = true;
-    const e = k * k * (3 - 2 * k), slide = Math.max(0, Math.min(1, (e - 0.35) / 0.65));
-    const jolt = Math.round(Math.max(-2, Math.min(3, (S.g - 1) * 2.2)) + (S.shake > 0.3 ? Math.sin(S.time * 57) * 0.9 * S.shake : 0));
-    const oy = Math.round((1 - slide * slide * (3 - 2 * slide)) * (PH + 16)) + (slide >= 1 ? jolt : 0);
-    const fy = Math.round((1 - slide) * 34);
-    if(!oy && !fy)out.set(steadyPanel);
-    else {
-    out.fill(0);
-    // canopy frame drops in from above, the panel rises from below
-    for (let y = 0; y < H - fy; y++) { const src = (y + fy) * W, dst = y * W; if (y + fy < H) for (let x = 0; x < W; x++) { const c = frame[src + x]; if (c) out[dst + x] = c; } }
-    const top = y0 - 14;
-    for (let y = top; y < H; y++) { const yy = y + oy; if (yy >= H) break; const src = y * W, dst = yy * W; for (let x = 0; x < W; x++) { const c = panel[src + x]; if (c) out[dst + x] = c; } }
-    }
-    T = out;
-    const roll = S.roll;
-    if (slide > 0.5) hud(S, env, oy, k > 0.985);
-
-    // ── airspeed ──
-    let [x, y, r] = G.asi; y += oy;
-    needle(x, y, asiA(S.speed * 3.6), r - 4, K.needle, 4); cap(x, y);
-    // ── altimeter ──
-    [x, y, r] = G.alt; y += oy;
-    const altM = Math.max(0, S.pos[1]);
-    rect(x - 9, y + 6, 19, 7, K.ink); text(String(Math.round(altM / 10) * 10).padStart(4, '0'), x - 7, y + 7, K.a3);
-    needle(x, y, altM / 10000 * Math.PI * 2, r - 11, K.white, 2);
-    needle(x, y, (altM % 1000) / 1000 * Math.PI * 2, r - 4, K.needle, 4); cap(x, y);
-    // ── artificial horizon ──
-    [x, y, r] = G.ai; y += oy;
-    {
-      const rb = r - 5, c = Math.cos(roll), s = Math.sin(roll), pp = S.pitch * rb / 0.62, rr = rb * rb + rb * 0.8;
-      for (let j = -rb; j <= rb; j++) for (let i = -rb; i <= rb; i++) {
-        if (i * i + j * j > rr) continue;
-        const el = -i * s - j * c + pp, al = i * c - j * s;
-        let col = el > 0 ? (el > rb * 0.75 ? K.sky2 : K.sky) : (el < -rb * 0.75 ? K.gnd2 : K.gnd);
-        if (Math.abs(el) < 0.62) col = K.white;
-        else { const q = el / 6.3, n = Math.round(q); if (n !== 0 && Math.abs(n) <= 3 && Math.abs(q - n) < 0.09 && Math.abs(al) < (n % 2 ? 4 : 7)) col = K.white; }
-        px(x + i, y + j, col);
-      }
-      // sky pointer on the bank scale
-      const [tx, ty] = pol(x, y, -roll, rb - 1); px(Math.round(tx), Math.round(ty), K.needle);
-      const [ux, uy] = pol(x, y, -roll, rb - 2); px(Math.round(ux), Math.round(uy), K.needle);
-      const [vx, vy] = pol(x, y, -roll, rb - 3); px(Math.round(vx), Math.round(vy), K.white);
-      // fixed aircraft symbol
-      rect(x - 12, y + 1, 8, 1, K.ink); rect(x + 5, y + 1, 8, 1, K.ink);
-      rect(x - 12, y, 8, 1, K.amber); rect(x + 5, y, 8, 1, K.amber); rect(x - 5, y, 1, 3, K.amber); rect(x + 5, y, 1, 3, K.amber);
-      rect(x - 1, y - 1, 3, 3, K.ink); px(x, y, K.amber);
-    }
-    // ── turn and slip ──
-    [x, y, r] = G.tc; y += oy;
-    {
-      const a = Math.max(-1, Math.min(1, S.omega / 1.3)) * rad(34), c = Math.cos(a), s = Math.sin(a);
-      line(x - c * 11, y - 2 - s * 11, x + c * 11, y - 2 + s * 11, K.white);
-      line(x - c * 4, y - 3 - s * 4, x + c * 4, y - 3 + s * 4, K.white);
-      line(x, y - 2, x + s * 5, y - 2 - c * 5, K.white); disc(x, y - 2, 1, K.white);
-      const slip = Math.max(-1, Math.min(1, S.slip * 3));
-      disc(Math.round(x + slip * 6), y + 10, 1, K.tick);
-    }
-    // ── heading ──
-    [x, y, r] = G.hi; y += oy;
-    {
-      const names = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
-      for (let b = 0; b < 360; b += 30) {
-        const a = rad(b) - S.yaw;
-        const [xa, ya] = pol(x, y, a, r - 1), [xb, yb] = pol(x, y, a, r - (b % 90 === 0 ? 4 : 3));
-        line(xa, ya, xb, yb, b % 90 === 0 ? K.tick : K.dim);
-        if (names[b]) { const [tx, ty] = pol(x, y, a, r - 9); glyph(names[b], Math.round(tx) - 1, Math.round(ty) - 2, b === 0 ? K.needle : K.tick); }
-      }
-      px(x, y - r + 1, K.needle); px(x - 1, y - r, K.needle); px(x + 1, y - r, K.needle); px(x, y - r, K.needle);
-      rect(x, y - 4, 1, 8, K.amber); rect(x - 4, y - 1, 9, 1, K.amber); rect(x - 2, y + 3, 5, 1, K.amber);
-    }
-    // ── vertical speed ──
-    [x, y, r] = G.vsi; y += oy;
-    needle(x, y, rad(-90) + Math.max(-1, Math.min(1, S.vs / 140)) * rad(118), r - 3, K.needle, 3); cap(x, y);
-
-    if (wide) {
-      // ── ground-mapping radar ──
-      [x, y, r] = G.scope; y += oy;
-      {
-        const rs = r - 1, rr = rs * rs + rs * 0.8, sc = 30, sw = (S.time * 1.9) % (Math.PI * 2);
-        const fx = Math.sin(S.yaw), fz = -Math.cos(S.yaw), rx = Math.cos(S.yaw), rz = Math.sin(S.yaw);
-        const pal = [K.a0, K.a1, K.a2, K.a3, K.a4];
-        const diameter=2*rs+1;
-        if(!radarScan)radarScan=new Uint32Array(diameter*diameter);
-        const refresh=S.time>=radarTime||S.time<radarTime-.12;
-        if(refresh)radarTime=S.time+.09;
-        for (let j = -rs; j <= rs; j++) for (let i = -rs; i <= rs; i++) {
-          const d2 = i * i + j * j; if (d2 > rr) continue;
-          const index=(j+rs)*diameter+i+rs;
-          if(!refresh){px(x+i,y+j,radarScan[index]);continue;}
-          const wx = S.pos[0] + (rx * i - fx * j) * sc, wz = S.pos[2] + (rz * i - fz * j) * sc;
-          const h = env.groundAt(wx, wz);
-          let lvl = h < 0 ? 0 : h < 60 ? 1.2 : h < 150 ? 2.0 : 2.9;
-          let dl = (sw - Math.atan2(i, -j)) % (Math.PI * 2); if (dl < 0) dl += Math.PI * 2; dl /= Math.PI * 2;
-          lvl += dl < 0.03 ? 1.4 : dl < 0.3 ? 0.5 : dl > 0.7 ? -0.6 : 0;
-          if (h < 0 && dl < 0.03) lvl = 1.4;
-          const d = Math.sqrt(d2); if (Math.abs(d - 10) < 0.5 || Math.abs(d - 20) < 0.5) lvl += h < 0 ? 0.8 : -0.8;
-          lvl += ((i + j) & 1) ? 0.25 : -0.25;
-          radarScan[index]=pal[Math.max(0,Math.min(4,Math.round(lvl)))];px(x+i,y+j,radarScan[index]);
-        }
-        px(x, y - 2, K.white); px(x, y - 1, K.white); rect(x - 2, y, 5, 1, K.white); px(x, y + 1, K.white); rect(x - 1, y + 2, 3, 1, K.white);
-        text(String(Math.min(9999, Math.round(S.agl))).padStart(4, '0'), cx - 151, y0 + oy + 110, K.a3);
-      }
-      // ── engines ──
-      [x, y, r] = G.tach; y += oy;
-      needle(x, y, rad(-130 + 260 * (0.18 + 0.78 * S.engine + Math.sin(S.time * 23) * 0.006)), r - 3, K.needle, 2); cap(x, y);
-      [x, y, r] = G.thr; y += oy;
-      needle(x, y, rad(-130 + 260 * S.throttle), r - 3, K.needle, 2); cap(x, y);
-      [x, y, r] = G.clock; y += oy;
-      { const d = new Date(), hh = (d.getHours() % 12 + d.getMinutes() / 60) / 12 * Math.PI * 2, mm = d.getMinutes() / 60 * Math.PI * 2;
-        const [hx, hy] = pol(x, y, hh, r - 5), [mx2, my2] = pol(x, y, mm, r - 3); line(x, y, hx, hy, K.ink); line(x, y, mx2, my2, K.ink); px(x, y, K.needle); }
-      // throttle lever follows the afterburner
-      const [lx, ly0] = G.lever; const ly = ly0 + oy + Math.round(28 - 26 * S.throttle);
-      rect(lx - 1, ly, 3, 36 - (ly - ly0 - oy), K.dim); rect(lx - 5, ly - 2, 11, 7, K.ink); rect(lx - 4, ly - 1, 9, 5, K.red); rect(lx - 4, ly - 1, 9, 1, C('#ff9a7a')); rect(lx - 4, ly + 3, 9, 1, K.needleDk);
-      // lamps: systems, low height, afterburner
-      const [mx, my0] = G.lamps; const my = my0 + oy + 34;
-      const lamp = (xx, on, cOn, cOff) => { disc(xx, my, 3, on ? cOn : cOff); if (on) { px(xx - 1, my - 1, K.white); for (const [a, b] of [[-5, 0], [5, 0], [0, -5], [0, 5]]) px(xx + a, my + b, cOn); } };
-      lamp(mx - 16, true, K.green, K.greenDk);
-      lamp(mx - 5, S.agl < 55 && (S.time * 4 % 1) < 0.6, K.amber, K.amberDk);
-      lamp(mx + 6, S.boost > 0.3, K.red, K.redDk);
-    }
-    ctx.putImageData(img, 0, 0);
-  }
-
-  return {resize,draw,coveredRows:()=>Math.max(0,PH-18)};
-})();
-window.Cockpit = Cockpit;
-
 // ───────────────────────── game ─────────────────────────
 (function () {
   'use strict';
@@ -1203,19 +842,26 @@ window.Cockpit = Cockpit;
     IW=Math.ceil(w/foreground);IH=Math.ceil(h/foreground);
     const terrainScale=fast?foreground:base+bias*(w>=h?1.2:1);
     landW=Math.ceil(w/terrainScale);landH=Math.ceil(h/terrainScale);
-    for(const c of [glc,uic]){
-      c.width=IW;c.height=IH;c.style.width=innerWidth+'px';c.style.height=innerHeight+'px';
+    function fit(old,w,h,depth){
+      if(old && old.w===w && old.h===h)return old;
+      if(old){gl.deleteFramebuffer(old.fb);gl.deleteTexture(old.color);if(old.sampleDepth)gl.deleteTexture(old.depth);else gl.deleteRenderbuffer(old.depth);}
+      return w?Object.assign(target(w,h,depth),{w,h}):null;
     }
-    for(const t of [sceneTarget,landTarget,surfaceTarget])if(t){
-      gl.deleteFramebuffer(t.fb);gl.deleteTexture(t.color);if(t.sampleDepth)gl.deleteTexture(t.depth);else gl.deleteRenderbuffer(t.depth);
-    }
-    sceneTarget=target(IW,IH);surfaceTarget=target(landW,landH);
-    landTarget=landW===IW&&landH===IH?null:target(landW,landH,true);
+    const scaleCanvas=(c,w,h)=>{
+      c.style.width=innerWidth+'px';c.style.height=innerHeight+'px';
+      if(c.width===w&&c.height===h)return false;
+      c.width=w;c.height=h;return true;
+    };
+    scaleCanvas(glc,IW,IH);
+    sceneTarget=fit(sceneTarget,IW,IH,false);surfaceTarget=fit(surfaceTarget,landW,landH,false);
+    landTarget=fit(landTarget,landW===IW&&landH===IH?0:landW,landH,true);
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    const uiScale=Math.min(foreground,base+1);
-    uic.width=Math.ceil(w/uiScale);uic.height=Math.ceil(h/uiScale);
-    Cockpit.resize(uic,uic.width,uic.height);
+    const uiScale=Math.min(foreground,base+1,w/210,h/200);
+    if(scaleCanvas(uic,Math.ceil(w/uiScale),Math.ceil(h/uiScale))||!uiInitialized){
+      Cockpit.resize(uic,uic.width,uic.height);uiInitialized=true;
+    }
   }
+  let uiInitialized=false;
   addEventListener('resize', resize);
 
   // ── world ──
@@ -1351,6 +997,7 @@ window.Cockpit = Cockpit;
   const axisKey = (plus,minus) => Number(keys.has(plus))-Number(keys.has(minus));
   const tipFor = () => Flight.fleet[body.type].tip;
   function resetFlight(type, pos, yaw) {
+    Cockpit.select(type);
     impactUntil=0;
     trial.next=0;trial.time=0;lastCondition='';damageUntil=0;body = Flight.create(type,pos,yaw); S.pos=body.pos;gearRequest=body.gearDown;waveHistory.clear();
     accumulator=0; chaseQuat=body.quat.slice();
@@ -1450,7 +1097,7 @@ window.Cockpit = Cockpit;
     const B=Flight.axes(body.quat);
     S.yaw=Math.atan2(B.f[0],-B.f[2]); S.pitch=Math.asin(clamp(B.f[1],-1,1)); S.roll=Math.atan2(-B.r[1],B.u[1]);
     S.omega=-body.rates[1]; S.speed=Math.hypot(...body.vel); S.vs=body.vel[1]; S.g=body.load; S.stalled=body.stalled;
-    S.slip=body.slip; S.throttle=body.throttle; S.engine=body.engine;
+    S.slip=body.slip; S.throttle=body.throttle; S.engine=body.engine; S.gear=body.gear;
     S.boost=body.type==='comet'?sstep(.78,1,body.engine):(body.type==='pulse'||body.type==='needle')?body.deploy:0; S.shake=REDUCED?0:S.boost;
     S.ground=Math.max(0,groundAt(S.pos[0],S.pos[2])); S.agl=S.pos[1]-S.ground; S.skim=0;
     const { L, E1, E2 } = WORLD;
@@ -1576,7 +1223,10 @@ window.Cockpit = Cockpit;
       return { pos, B: {r:right,u:cross(right,front),f:front}, fov: 0.98 + 0.12 * S.boost };
     }
     const sh = S.shake * 0.05;
-    const eye = toWorld(B, [PLANE.EYE[0] + Math.sin(S.time * 61) * sh, PLANE.EYE[1] + Math.sin(S.time * 47) * sh, PLANE.EYE[2]]);
+    // The propeller aircraft have their canopy aft of the nose. The J-16 pilot
+    // sits under the forward glass, ahead of the tandem canopy crossbar.
+    const prop=body.type==='rv8a'||body.type==='sail',tandemSeat=body.type==='j16';
+    const eye = toWorld(B,[Math.sin(S.time*61)*sh,(prop?1.43:tandemSeat?1.51:PLANE.EYE[1])+Math.sin(S.time*47)*sh,prop?.45:tandemSeat?5.25:PLANE.EYE[2]]);
     // the pilot looks a little down over the nose, so the land stays in the glass
     const ca = Math.cos(0.19), sa = Math.sin(0.19);
     return { pos: eye, B: { r: B.r, u: add(mul(B.u, ca), mul(B.f, sa)), f: add(mul(B.f, ca), mul(B.u, -sa)) }, fov: 1.16 + 0.08 * S.boost };
@@ -1653,6 +1303,7 @@ window.Cockpit = Cockpit;
   }
   let districtCount=0;
   const castPositions=new Float32Array(8*3);
+  const castBounds=new Float32Array(4);
   let castCount=0;
   function bindShadows(pr){
     gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,atlas.color);
@@ -1663,7 +1314,8 @@ window.Cockpit = Cockpit;
       gl.uniform4fv(pr.u('uDistricts[0]'),districts);gl.uniform2fv(pr.u('uDistrictTiles[0]'),districtTiles);
     }
     if(!castCount && !districtCount)return;
-    gl.uniform3fv(pr.u('uCasters[0]'),castPositions);gl.uniform3fv(pr.u('uCastLight'),sunL);
+    if(castCount){gl.uniform3fv(pr.u('uCasters[0]'),castPositions);gl.uniform4fv(pr.u('uCastBounds'),castBounds);}
+    gl.uniform3fv(pr.u('uCastLight'),sunL);
     gl.uniform3fv(pr.u('uLightRight'),lightRight);gl.uniform3fv(pr.u('uLightUp'),lightUp);
   }
   function render() {
@@ -1719,12 +1371,23 @@ window.Cockpit = Cockpit;
         gl.bindFramebuffer(gl.FRAMEBUFFER,atlas.fb);gl.clearColor(0,0,0,0);
         gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(pr.p);
       }
-      const tile=castCount++;castPositions.set(p,tile*3);
+      const tile=castCount++,u=dot(p,lightRight),v=dot(p,lightUp);
+      castPositions[tile*3]=u;castPositions[tile*3+1]=v;castPositions[tile*3+2]=dot(p,sunL);
+      // Include the full 52-unit shadow tile, also while the formation spreads out.
+      castBounds[0]=tile?Math.min(castBounds[0],u-26):u-26;castBounds[1]=tile?Math.min(castBounds[1],v-26):v-26;
+      castBounds[2]=tile?Math.max(castBounds[2],u+26):u+26;castBounds[3]=tile?Math.max(castBounds[3],v+26):v+26;
       gl.viewport((tile%4)*128,(tile>>2)*128,128,128);
       gl.uniformMatrix4fv(pr.u('uVP'),false,lightMatrix(p,26));drawAircraft(...c);
     }
     const VP=matVP(cam,aspect);
+    const covered=cam.wCockpit===1?Math.max(0,Cockpit.coveredRows()-2)/uic.height:0;
+    function clipPanel(w,h){
+      const rows=Math.floor(covered*h);
+      if(rows){gl.enable(gl.SCISSOR_TEST);gl.scissor(0,rows,w,h-rows);}
+      else gl.disable(gl.SCISSOR_TEST);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER,surfaceTarget.fb);gl.viewport(0,0,landW,landH);
+    clipPanel(landW,landH);
     gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
     landSurface.draw(cam,VP,heightField);
     gl.bindFramebuffer(gl.FRAMEBUFFER,(landTarget||sceneTarget).fb);
@@ -1744,14 +1407,11 @@ window.Cockpit = Cockpit;
     gl.uniform2f(pr.u('uCloudOff'), S.cloudOff[0] % 1, S.cloudOff[1] % 1);
     gl.uniform2f(pr.u('uNF'), NEAR, FARZ);
     gl.uniform1f(pr.u('uCeil'), mix(1e5, S.pos[1] - 14, sstep(0.25, 0.75, (S.view === 0 ? S.viewT : 0) + (S.prev === 0 ? 1 - S.viewT : 0))));
-    // Only the fully seated pilot has an opaque lower instrument panel.
-    const hiddenRows=cam.wCockpit>=.9999?Math.max(0,Math.floor((Cockpit.coveredRows()-1)*landH/uic.height)):0;
-    if(hiddenRows){gl.enable(gl.SCISSOR_TEST);gl.scissor(0,hiddenRows,landW,landH-hiddenRows);}
     gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,3);
-    if(hiddenRows)gl.disable(gl.SCISSOR_TEST);
 
     if(landTarget){
       gl.bindFramebuffer(gl.FRAMEBUFFER,sceneTarget.fb);gl.viewport(0,0,IW,IH);
+      clipPanel(IW,IH);
       pr=P.expand;gl.useProgram(pr.p);
       gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,landTarget.color);gl.uniform1i(pr.u('uLandColor'),0);
       gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,landTarget.depth);gl.uniform1i(pr.u('uLandDepth'),1);
@@ -1888,6 +1548,7 @@ window.Cockpit = Cockpit;
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneTarget.color); gl.uniform1i(pr.u('uScene'), 0);
     gl.uniform2f(pr.u('uRes'), IW, IH);
     gl.bindVertexArray(quadVAO); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if(covered)gl.disable(gl.SCISSOR_TEST);
 
     if (window.Cockpit) Cockpit.draw(cam.wCockpit, S, null, { groundAt, cam });
   }

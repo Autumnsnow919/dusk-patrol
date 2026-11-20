@@ -12,7 +12,7 @@ function createServer() {
   require('./contacts.cjs').prepare('scenery');
   const sessions = new Map();
   const rooms = new Map();
-  const files = new Set(['index.html', 'airfields.js','airframes.js','flight.js', 'room.js', 'hangar.css','scope.js','lake.js','outfit.js','terrain.js','chart.js','sight.js','land-surface.js','world-cache.js','peer-pose.js','sound.js','PixelifySans.ttf','IBMPlexMono.ttf']);
+  const files = new Set(['index.html', 'airfields.js','airframes.js','flight.js','cockpit.js', 'room.js', 'hangar.css','scope.js','lake.js','outfit.js','terrain.js','chart.js','sight.js','land-surface.js','world-cache.js','peer-pose.js','sound.js','PixelifySans.ttf','IBMPlexMono.ttf']);
   const expiry = 12000;
   let nextPrune=0;
   const remove=(token,pilot)=>{

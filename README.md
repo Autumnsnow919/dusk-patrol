@@ -24,6 +24,10 @@
 
 四张图均为游戏截图。四架飞机在观光、PvE 和 PvP 里都能选，同房玩家可以各飞各的。造型取自公开照片，操控和部件耐久按游戏平衡设置。[苏-27P 航展照片](https://commons.wikimedia.org/wiki/File%3AUkrainian_Air_Force_Sukhoi_Su-27P_Flanker_%2843240429274%29.jpg) · [歼-10、歼-16、歼-20 同框照片](https://www.mod.gov.cn/gfbw/wzll/yw_214068/4830500.html)
 
+出动后在追尾视角按一次 **空格**，就能看到所选飞机的驾驶舱。下图是在东湖长堤机场同一条进近线上拍的。苏-27 用圆表和琥珀色地形屏，歼-10 把姿态主屏放在中央，歼-16 把姿态和飞行数据分到两块屏，歼-20 用一整块宽屏。座舱布局为游戏原创。33 架飞机都有自己的仪表板和舱框组合。
+
+![同一进近位置的四个第一人称座舱，上排为苏-27、歼-10，下排为歼-16、歼-20](docs/media/cockpits.png)
+
 [前 25 架飞机的结构复查](docs/AIRFRAME-REVIEW.md) · [同批机型三视角图板](docs/media/airframe-inspection.webp)
 
 | 星斑 X-3 | 织云 R-5 | 信风 L-4 |
