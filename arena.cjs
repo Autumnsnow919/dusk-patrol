@@ -15,7 +15,7 @@ const missileHits={fuselage:{hull:1,local:1},engine:{hull:.62,local:.88},tail:{h
   leftWing:wingHit,rightWing:wingHit,noseGear:gearHit,leftGear:gearHit,rightGear:gearHit};
 const weapons = {
   echo:{wait:5,range:155,damage:28},arc:{wait:6,range:440,jump:210,damage:18},
-  glyph:{wait:4.2,range:700,damage:30},prism:{wait:6.5},
+  glyph:{wait:4.2,range:700,radius:115,damage:30},prism:{wait:6.5},
   pulse: {range:290,wait:3.6,damage:23},
   gun: { range: 620, wait: 1/Sight.gunRate, damage: 2 },
   missile:Sight.profiles.missile,ribbon:Sight.profiles.ribbon,
@@ -31,8 +31,8 @@ function spawn(slot,type,cooperative) {
 }
 const rounded=(vector,scale)=>vector.map(value=>Math.round(value*scale)/scale);
 class Arena {
-  constructor(now,rule='beacon') {
-    this.mission=rule==='waves'?new PatrolWaves(weapons,groundAt):null;
+  constructor(now,rule='beacon',patrolDraw) {
+    this.mission=rule==='waves'?new PatrolWaves(weapons,groundAt,patrolDraw):null;
     this.rule=rule;this.starId=null;this.starTime=0;
     this.time=0; this.matchTime=0; this.last=now; this.acc=0; this.players=new Map(); this.events=[]; this.tracers=[];this.tracerId=0;this.shots=[]; this.shotId=0; this.serial=0; this.holder=null; this.hold=0; this.zoneCount=0;
   }
@@ -263,7 +263,7 @@ class Arena {
         const peer=this.players.get(mark.id);
         if(peer?.hp && peer.life===mark.life){
           this.event('bloom',player,peer,mark.pos,mark.pos);
-          if(Math.hypot(...peer.body.pos.map((v,i)=>v-mark.pos[i]))<=115)hits.push([player,peer,weapons.glyph.damage]);
+          if(Math.hypot(...peer.body.pos.map((v,i)=>v-mark.pos[i]))<=weapons.glyph.radius)hits.push([player,peer,weapons.glyph.damage]);
         }
         player.glyph=null;
       }
@@ -476,7 +476,7 @@ class Arena {
       shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type]),
       events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
     if(Sight.profiles[player.weapon])result.tracking={focus:player.focus,marks:[...player.marks].map(([id,mark])=>[id,Sight.percent(mark.time,Sight.profiles[player.weapon].fill)])};
-    if(this.mission)result.mission=this.mission.snapshot(this.time);
+    if(this.mission)result.mission=this.mission.snapshot(this.time,this.players.get(player.target));
     if(compactSelf)result.self=PeerPose.packSelf(result.self);
     return result;
   }

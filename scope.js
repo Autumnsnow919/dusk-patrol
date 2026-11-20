@@ -8,15 +8,20 @@ class DuelScope {
     this.next=now+interval-(now-this.next)%interval;
     const c=this.canvas,g=this.ctx,w=Math.min(960,innerWidth),h=Math.round(innerHeight*w/innerWidth);
     if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
-    if(navOnly&&this.navOnly)g.clearRect(w-111,37,111,126);else g.clearRect(0,0,w,h);
+    const seated=cam.wCockpit>.985,windowFloor=seated?Math.floor(h*Cockpit.windscreenHeight())-3:h;
+    const docked=seated&&w<h,R=docked?27:40,rx=w-R-20,ry=docked?Math.min(h-100,windowFloor+R+12):90;
+    if(navOnly&&this.navOnly&&this.radarY===ry)g.clearRect(rx-R-10,ry-R-10,2*R+20,2*R+48);else g.clearRect(0,0,w,h);
     this.navOnly=navOnly;
+    this.radarY=ry;
     g.font='500 12px "IBM Plex Mono", monospace';g.lineWidth=1;
     const focal=h/(2*Math.tan(cam.fov/2)),gold='#ffd884',cream='#fff3dc',teal='#8ed8c0',red='#ff9364',ink='#1b1326';
     function project(p){
       const x=p[0]-cam.pos[0],y=p[1]-cam.pos[1],z=p[2]-cam.pos[2];
       const dot=a=>x*a[0]+y*a[1]+z*a[2],depth=dot(cam.B.f);
       if(depth<1)return null;
-      return [Math.round(w/2+dot(cam.B.r)*focal/depth),Math.round(h/2-dot(cam.B.u)*focal/depth)];
+      const py=Math.round(h/2-dot(cam.B.u)*focal/depth);
+      if(seated && py>=windowFloor)return null;
+      return [Math.round(w/2+dot(cam.B.r)*focal/depth),py];
     }
     function path(points,close=false){
       if(points.some(p=>!p))return;
@@ -30,7 +35,6 @@ class DuelScope {
       g.fillStyle=col;g.fillText(txt,x,y);
     }
     const duel=room.combat,self=room.self,basis=Flight.axes(body.quat),target=room.peers.get(room.target);
-    const rx=w-60,ry=90,R=40;
     const range=duel?(Sight.profiles[room.weapon]?.reach||Sight.reach):4000;
     const showTarget=duel && target?.hp;
     const pos=showTarget?target.displayPos:null;
@@ -72,6 +76,7 @@ class DuelScope {
       const [px,py]=screen;if(px<0||py<0||px>w||py>h)continue;
       let ly=Math.max(15,py-12);
       for(const row of labelRows)if(Math.abs(row[0]-px)<95&&Math.abs(row[1]-ly)<14)ly=row[1]+15;
+      if(seated)ly=Math.min(ly,windowFloor-4);
       const altitude=p[1]-body.pos[1],level=Math.abs(altitude)<50?'':altitude>0?' ↑':' ↓';
       const track=charge===undefined?'':charge===100?' LOCK':' '+charge+'%';
       labelRows.push([px,ly]);label((self?.star?.id===peer.id?'★ ':'')+peer.name+level+track+(selected?' · '+Math.round(Math.hypot(dx,altitude,dz))+' m':''),px+9,ly,col);
@@ -82,21 +87,23 @@ class DuelScope {
       }
     }
     if(!duel||!self)return;
-    const reticle=room.weapon==='laser'?Sight.laser:Sight.profiles[room.weapon];
-    const dist=target?Math.max(75,Math.min(reticle?.reach||Sight.reach,targetRange)):650;
-    const axisPoint=body.pos.map((v,i)=>v+basis.f[i]*dist),aim=project(axisPoint);
-    g.strokeStyle=cream;
-    if(aim){path([[aim[0]-4,aim[1]],[aim[0]+4,aim[1]]]);path([[aim[0],aim[1]-4],[aim[0],aim[1]+4]]);}
-    if(reticle){
-      const dots=[];
-      for(const [co,si] of scopeRing){
-        dots.push(project(axisPoint.map((v,d)=>v+reticle.ring*dist*(co*basis.r[d]+si*basis.u[d]))));
+    if(!seated){
+      const reticle=room.weapon==='laser'?Sight.laser:Sight.profiles[room.weapon];
+      const dist=target?Math.max(75,Math.min(reticle?.reach||Sight.reach,targetRange)):650;
+      const axisPoint=body.pos.map((v,i)=>v+basis.f[i]*dist),aim=project(axisPoint);
+      g.strokeStyle=cream;
+      if(aim){path([[aim[0]-4,aim[1]],[aim[0]+4,aim[1]]]);path([[aim[0],aim[1]-4],[aim[0],aim[1]+4]]);}
+      if(reticle){
+        const dots=[];
+        for(const [co,si] of scopeRing){
+          dots.push(project(axisPoint.map((v,d)=>v+reticle.ring*dist*(co*basis.r[d]+si*basis.u[d]))));
+        }
+        g.lineWidth=3;g.strokeStyle='#292335';path(dots,true);
+        const charge=room.weapon==='laser'?Math.floor(100*self.lock):room.marks.get(room.target)||0;
+        g.lineWidth=1;g.strokeStyle=charge===100?gold:charge?teal:cream;path(dots,true);
+        const bottom=dots[18];
+        if(charge && bottom)label(charge===100?'LOCK':charge+'%',bottom[0]-15,bottom[1]+16,g.strokeStyle);
       }
-      g.lineWidth=3;g.strokeStyle='#292335';path(dots,true);
-      const charge=room.weapon==='laser'?Math.floor(100*self.lock):room.marks.get(room.target)||0;
-      g.lineWidth=1;g.strokeStyle=charge===100?gold:charge?teal:cream;path(dots,true);
-      const bottom=dots[18];
-      if(charge && bottom)label(charge===100?'LOCK':charge+'%',bottom[0]-15,bottom[1]+16,g.strokeStyle);
     }
     if(room.weapon==='gun' && target?.hp && target.vel && targetRange<=620){
       const pip=project(Sight.badge(target.displayPos,target.vel,body)),p=project(target.displayPos);
@@ -109,8 +116,11 @@ class DuelScope {
     }
     if(self.incoming||self.warned){
       const txt=self.incoming?'来袭  ·  X 热诱弹':'锁定预警';
-      label(txt,w/2-g.measureText(txt).width/2,h*.21,self.incoming?red:gold);
+      label(txt,seated?w-108:w/2-g.measureText(txt).width/2,seated?ry+R+45:h*.21,self.incoming?red:gold);
     }
+    if(!room.events.length)return;
+    let glyphWarning=false;
+    if(seated){g.save();g.beginPath();g.rect(0,0,w,windowFloor);g.clip();}
     for(const event of room.events){
       const age=(now-event.born)/1000,from=project(event.a),to=project(event.b);
       g.strokeStyle=event.kind==='laser'?teal:gold;
@@ -128,7 +138,7 @@ class DuelScope {
       }
       if(event.kind==='glyph' && age<1.2){
         g.strokeStyle='#f5aedc';circle(to,8+25*(1-age/1.2));
-        if(room.id===event.to)label('染光印 · 飞离印记',w*.5-55,h*.26,g.strokeStyle);
+        if(room.id===event.to)glyphWarning=true;
       }
       if(event.kind==='bloom' && age<.55){g.strokeStyle='#fed3ec';circle(to,5+age*74);}
       if((event.kind==='prism'||event.kind==='refract')&&age<.65){
@@ -138,6 +148,8 @@ class DuelScope {
       if(event.kind==='burst'&&age<.6)circle(to,5+age*25);
       if(event.kind==='laser'&&age<.15)path([from,to]);
     }
+    if(seated)g.restore();
+    if(glyphWarning)label('染光印 · 飞离印记',seated?w-108:w*.5-55,seated?ry+R+61:h*.26,'#f5aedc');
   }
 }
 

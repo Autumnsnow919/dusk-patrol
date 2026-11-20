@@ -3,25 +3,152 @@ const Flight = require('./flight.js');
 const {Arena} = require('./arena.cjs');
 const {createServer} = require('./server.cjs');
 const Outfit=require('./outfit.js');
+const Sight=require('./sight.js');
+
+function repeatableArena(seed=1){
+  return new Arena(0,'waves',length=>{
+    seed=(Math.imul(1664525,seed)+1013904223)>>>0;
+    return Math.floor(length*seed/4294967296);
+  });
+}
+function equip(drone,...ids){
+  const kit=Outfit.maskOf(...ids);
+  assert(Outfit.valid(kit));
+  Object.assign(drone,{kit,pack:ids,weapon:ids[0],slotCursor:0,nextAction:0});
+}
+
+function exerciseDraw(){
+  const masks=[];
+  for(let mask=1;mask<2**Outfit.items.length;mask++){
+    if(Outfit.valid(mask) && Outfit.items.filter(item=>Outfit.has(mask,item.id)).length>=2)masks.push(mask);
+  }
+  const seen=new Set();
+  for(let i=0;i<masks.length;i++){
+    const room=new Arena(0,'waves',length=>i%length);
+    const one=room.add('one','tern');room.tick(Flight.tick);
+    const [a,b]=room.mission.drones;
+    seen.add(a.kit);assert.notEqual(a.kit,b.kit);
+    const kit=a.kit,late=room.add('late','tern');one.target=late.target=a.id;
+    room.tick(Flight.tick);
+    for(const pilot of [one,late])assert.equal(room.snapshot(pilot,0).mission.contact.kit,kit);
+  }
+  assert.deepEqual(seen,new Set(masks));
+  assert(Outfit.items.every(item=>masks.some(mask=>Outfit.has(mask,item.id))));
+  console.log(masks.length+' distinct legal NPC loadouts reachable at first spawn');
+}
+exerciseDraw();
 
 function exerciseDecisions(){
-  const game=new Arena(0,'waves'),one=game.add('one','tern'),two=game.add('two','swift');
+  const game=repeatableArena(),one=game.add('one','tern'),two=game.add('two','swift');
   game.tick(Flight.tick);game.time=4;const [a,b]=game.mission.drones;
+  equip(a,'glyph','prism');equip(b,'echo','pulse');
   function decide(){game.time+=.2;game.mission.update(game);}
   decide();assert.notEqual(a.partner,b.partner,'co-op routes share coverage');
+  assert.equal(a.target,a.partner);assert.equal(b.target,b.partner);
   for(const p of [one,two])p.body.pos=[7100,1100,3000];
   decide();assert.equal(a.route,'regroup');assert.equal(a.center[0],7100);
+  assert.notEqual(a.target,b.target,'both pilots are viable at the same distance');
+  assert.equal(a.target,a.partner);assert.equal(b.target,b.partner);
   a.body.pos=[7100,90,3100];a.body.vel[1]=-12;
   decide();assert.equal(a.route,'recover');assert(!a.fire);assert(a.controls.pitch>0);
-  b.body.pos=[7100,1100,3020];b.echoAt=game.time+2;
+  b.body.pos=[7100,1100,3020];b.echoAt=game.time+2;b.nextAction=0;
   decide();assert.equal(b.weapon,'pulse');assert(b.fire);assert(Outfit.has(b.kit,b.weapon));
   a.body.pos=[7090,1050,3015];a.hp-=10;decide();assert.notEqual(a.weapon,'prism');
   game.time+=.71;decide();assert.equal(a.weapon,'prism');assert(a.fire);
 }
 exerciseDecisions();
 
+function exerciseEquippedActions(){
+  const range={gun:330,missile:900,ribbon:1000,laser:500,pulse:200,arc:300,glyph:450,echo:120,prism:450};
+  for(const {id} of Outfit.items){
+    const game=repeatableArena(),pilot=game.add('pilot','tern');
+    game.tick(Flight.tick);
+    const [drone,other]=game.mission.drones;
+    other.hp=0;
+    equip(drone,id,id==='prism'?'glyph':'prism');
+    drone.body=Flight.create(drone.type,[900,1450,1500],0);
+    pilot.body=Flight.create(pilot.type,[900,1450,1500-range[id]],0);
+    drone.shield=pilot.shield=0;
+    if(id==='prism')game.damage(pilot,drone,8);
+    let observed=false;
+    for(let i=0;i<4/Flight.tick && !observed;i++){
+      game.tick(Flight.tick);
+      if(id==='gun')observed=drone.gunCount>=3 && game.tracerId>=3;
+      else observed=game.events.some(e=>e.from===drone.id && e.kind===id);
+    }
+    assert(observed,'room never executed the equipped '+id+' action');
+    const charge=Sight.profiles[id]?.fill??(id==='laser'?Sight.laser.fill:0);
+    assert(game.time>=charge,'room skipped the charge for '+id);
+  }
+  console.log('All '+Outfit.items.length+' equipped actions executed in live physics ticks');
+}
+exerciseEquippedActions();
+
+function exerciseRouteChanges(){
+  const game=repeatableArena(),pilot=game.add('pilot','tern');
+  game.tick(Flight.tick);game.time=4;
+  const [drone,mate]=game.mission.drones;mate.hp=0;
+  function decide(){game.time+=.15;game.mission.update(game);}
+  drone.body=Flight.create(drone.type,[900,1450,1500],0);
+  pilot.body=Flight.create(pilot.type,[900,1450,1410],0);
+  equip(drone,'ribbon','prism');decide();
+  assert.equal(drone.route,'space');assert.equal(drone.fire,false);
+  drone.gate=null;equip(drone,'gun','prism');decide();
+  assert.equal(drone.route,'pass');
+  const exit=drone.gate;
+  pilot.body.pos[0]+=150;decide();assert.equal(drone.gate,exit);
+  pilot.glyph={id:drone.id,life:drone.life,pos:drone.body.pos.slice(),until:game.time+1.2};
+  decide();assert.equal(drone.route,'escape');assert(!drone.fire);
+  pilot.shield=game.time+2;decide();
+  assert.equal(drone.target,null);assert.equal(drone.route,'escape');
+  pilot.glyph=null;pilot.shield=game.time+5;game.time+=3;decide();
+  assert.equal(drone.target,null);assert.equal(drone.gate,null);
+  assert.equal(drone.route,'patrol');assert(!drone.fire);
+  pilot.shield=0;decide();
+  assert.equal(drone.target,pilot.id);
+}
+exerciseRouteChanges();
+
+function exerciseCrossing(){
+  const game=repeatableArena(),pilot=game.add('pilot','tern');
+  game.tick(Flight.tick);
+  const [drone,mate]=game.mission.drones;mate.hp=0;
+  drone.body=Flight.create(drone.type,[900,1450,1500],0);
+  pilot.body=Flight.create(pilot.type,[930,1450,1400],Math.PI);
+  drone.shield=pilot.shield=0;
+  equip(drone,'gun','prism');
+  let passed=false,separated=false;
+  for(let i=0;i<75/Flight.tick;i++){
+    game.tick(Flight.tick);
+    const pos=drone.body.pos,to=pilot.body.pos;
+    const gap=Math.hypot(pos[0]-to[0],pos[1]-to[1],pos[2]-to[2]);
+    passed ||= drone.route==='pass';
+    separated ||= passed && gap>1000;
+    assert(drone.hp && pilot.life===1);
+    if(separated && gap<600)return;
+  }
+  assert.fail('NPC never caught up with a level same-type player after crossing');
+}
+exerciseCrossing();
+
+function exerciseWarning(){
+  const game=repeatableArena(),pilot=game.add('pilot','tern');
+  game.tick(Flight.tick);
+  const [drone,mate]=game.mission.drones;mate.hp=0;
+  drone.shield=pilot.shield=0;
+  drone.body=Flight.create(drone.type,[900,1450,1500],0);
+  pilot.body=Flight.create(pilot.type,[900,1450,4500],0);
+  const shot=require('./bolts.cjs').launch(1,pilot,drone,'ribbon');
+  game.shots.push(shot);
+  const run=seconds=>{for(let i=0;i<Math.round(seconds/Flight.tick);i++)game.tick(Flight.tick);};
+  run(.6);assert(!shot.diverted);assert.equal(drone.flareCells,12);
+  run(1.3);assert(shot.diverted);assert.equal(drone.flareCells,9);
+  assert.equal(game.events.filter(e=>e.from===drone.id && e.kind==='flare').length,3);
+}
+exerciseWarning();
+
 function rejoinTime(){
-  const game=new Arena(0,'waves'),leader=game.add('leader','j10');
+  const game=repeatableArena(),leader=game.add('leader','j10');
   // Keep the human at a repeatable meeting point. The NPCs fly the normal room physics.
   for(let i=0;i<45*120;i++){
     const t=i*Flight.tick;
@@ -34,11 +161,13 @@ function rejoinTime(){
 console.log('First patrol aircraft within 1 km of the meeting point after '+rejoinTime().toFixed(1)+' s');
 
 function exerciseWaves() {
-  const game = new Arena(0, 'waves');
+  const game = repeatableArena();
   const pilot = game.add('pilot', 'tern'), friend = game.add('friend', 'gull');
   const run = seconds => {
     for (let i=0; i<Math.round(seconds / Flight.tick); i++) game.tick(Flight.tick);
   };
+  run(Flight.tick);
+  equip(game.mission.drones[0],'glyph','prism');
   run(3);
   assert.equal(game.mission.wave, 1);
   const first = game.mission.drones[0], start = first.body.pos.slice();
@@ -60,6 +189,7 @@ function exerciseWaves() {
   assert(first.hp < enemyHp);
   for (const size of [2,3,4]) {
     assert.equal(game.mission.drones.length, size);
+    assert.equal(new Set(game.mission.drones.map(d=>d.kit)).size,size);
     assert(game.mission.drones.every(d=>Outfit.valid(d.kit)&&d.pack.every(id=>Outfit.has(d.kit,id))));
     for (const drone of game.mission.drones) game.damage(pilot,drone,100);
     run(.25);
@@ -88,7 +218,7 @@ async function exerciseRooms() {
     const leader = await (await join('')).json();
     assert(leader.room && leader.rule==='waves');
     await new Promise(resolve=>setTimeout(resolve,40));
-    const sync = token => call('sync',{controls:{pitch:0,yaw:0,roll:0,throttle:0},weapon:'gun'},token).then(r=>r.json());
+    const sync = (token,target) => call('sync',{controls:{pitch:0,yaw:0,roll:0,throttle:0},weapon:'gun',target},token).then(r=>r.json());
     const solo = await sync(leader.token);
     assert.equal(solo.mission.remaining,2);
     assert(solo.peers.every(peer=>peer.id.startsWith('ai-')));
@@ -101,17 +231,24 @@ async function exerciseRooms() {
     const late = await sync(team[7].token);
     assert.equal(late.peers.length,9);
     assert.deepEqual(late.peers.filter(p=>p.id.startsWith('ai-')).map(p=>p.id),solo.peers.map(p=>p.id));
+    const [a,b]=solo.peers;
+    const seenByLeader=(await sync(leader.token,a.id)).mission.contact;
+    const seenByFriend=(await sync(team[7].token,a.id)).mission.contact;
+    assert.equal(seenByLeader.id,a.id);assert(Outfit.valid(seenByLeader.kit));
+    assert.equal(seenByLeader.kit,seenByFriend.kit);
+    const next=(await sync(team[7].token,b.id)).mission.contact;
+    assert.equal(next.id,b.id);assert.notEqual(next.kit,seenByLeader.kit);
     for(const player of team) await call('leave',{},player.token);
     assert.equal((await join(leader.room,'tour')).status,200);
   } finally {await new Promise(resolve=>server.close(resolve));}
 }
 function exercisePatrolResponse(){
-  const arena=new Arena(0,'waves'),left=arena.add('left','tern'),right=arena.add('right','tern');
+  const arena=repeatableArena(),left=arena.add('left','tern'),right=arena.add('right','tern');
   left.body=Flight.create('tern',[-2800,1500,1600],0);
   right.body=Flight.create('tern',[4600,1500,1600],0);
   left.shield=right.shield=0;
   const advance=seconds=>{for(let i=0;i<Math.round(seconds/Flight.tick);i++)arena.tick(Flight.tick);};
-  advance(3);
+  advance(Flight.tick);equip(arena.mission.drones[0],'glyph','prism');advance(3);
   const [first,second]=arena.mission.drones;
   assert(first.center[0]<690 && second.center[0]>1110,'each lane travels toward its player');
   arena.damage(left,first,8);

@@ -32,7 +32,7 @@ const CockpitLayouts = (() => {
 
 // ───────────────────────── cockpit ─────────────────────────
 // Hand-plotted pixel panel and head-up display: every reading is driven by the flight state.
-const Cockpit = (function (fleet) {
+const Cockpit = (function (fleet,sight) {
   let steadyPanel=null,radarTime=-1,steadyOffset=NaN;
   const mapLines=[],mapPalette=[];
   let type='tern',bank='six',canopy='hoop',shape=CockpitLayouts.shapes.six,stations=[];
@@ -61,6 +61,7 @@ const Cockpit = (function (fleet) {
     'G': '011100101101011', 'L': '100100100100111', 'N': '110101101101101', 'O': '010101101101010', 'P': '110101110100100',
     'R': '110101110101101', 'S': '011100010001110', 'T': '111010010010010', 'U': '101101101101111', 'W': '101101111111101',
     'F': '111100110100100', 'M': '101111111101101', 'X': '101101010101101',
+    'C':'111100100100111','K':'101110100110101','%':'101001010100101',
     '-': '000000111000000', '.': '000000000000010', ' ': '000000000000000',
   };
 
@@ -124,10 +125,34 @@ const Cockpit = (function (fleet) {
   let G = {};
   // Expanded high-speed sector; preserve extra needle travel for approach speeds.
   const asiA=v=>type==='rv8a'?rad(-140+280*Math.min(360,v)/360):rad(-140+Math.min(800,v)*.21+Math.max(0,Math.min(1600,v-800))*.07);
-  const panelHeight=fit=>Math.max(132,Math.min(158,Math.round(H*.43)))+fit[0];
+  const panelHeight=fit=>Math.min(Math.max(132,Math.min(158,Math.round(H*.43))),Math.max(66,H-167))+fit[0];
   function windscreenHeight(){
     const fit=CockpitLayouts.shapes[CockpitLayouts.fits[type][0]];
     return (H-panelHeight(fit)-fit[1])/H;
+  }
+  let glassFit,ringCache;
+  function glassLayout(){
+    if(glassFit)return glassFit;
+    const bottom=Math.round(H*windscreenHeight())-3,top=Math.max(12,Math.round(bottom*.065));
+    const half=Math.min(Math.floor(W*.38),Math.ceil(H*.32));
+    const aimY=(top+bottom)/2+8;
+    // Reserve the heading tape and lower readouts around the widest game ring.
+    const focal=Math.max(1,Math.min(H/(2*Math.tan(.66)),(half-5)*.86/sight.ring,(bottom-top-32)*.39/sight.ring));
+    glassFit={left:(W>>1)-half,right:(W>>1)+half,top,bottom,aimY,fov:2*Math.atan(H/(2*focal))};
+    return glassFit;
+  }
+  const ringSteps=Array.from({length:40},(_,i)=>[Math.cos(i*Math.PI/20),Math.sin(i*Math.PI/20)]);
+  function captureContour(cam,axes,slope,project){
+    // Once seated, the camera rotates with the aircraft. Only a change of
+    // lens, glass layout or selected item changes this projected outline.
+    if(cam.wCockpit===1 && ringCache?.fov===cam.fov && ringCache.slope===slope)return ringCache.points;
+    const {f,r,u}=axes;
+    const points=ringSteps.map(([x,y])=>{
+      const a=slope*x,b=slope*y;
+      return project(f[0]+a*r[0]+b*u[0],f[1]+a*r[1]+b*u[1],f[2]+a*r[2]+b*u[2]);
+    });
+    ringCache=cam.wCockpit===1?{fov:cam.fov,slope,points}:null;
+    return points;
   }
   function layout() {
     [bank,canopy]=CockpitLayouts.fits[type];
@@ -145,7 +170,7 @@ const Cockpit = (function (fleet) {
       return {kind,x,y,half,height,r:Math.min(half-5,(height>>1)-5,28)};
     });
     crest=Math.max(0,shieldY(cx));solid=Math.max(0,Math.min(H,shieldY(0)+1));
-    dirtyLeft=Math.max(0,cx-(bank==='six'?(wide?190:90):span)-2);dirtyRight=W-dirtyLeft;
+    dirtyLeft=Math.max(0,Math.min(cx-(bank==='six'?(wide?190:90):span),glassLayout().left)-3);dirtyRight=W-dirtyLeft;
     G = {
       asi: [cx - 60, y0 + 50, 21], ai: [cx, y0 + 50, 26], alt: [cx + 60, y0 + 50, 21],
       tc: [cx - 52, y0 + 106, 16], hi: [cx, y0 + 106, 18], vsi: [cx + 52, y0 + 106, 16],
@@ -350,10 +375,10 @@ const Cockpit = (function (fleet) {
     rect(cx-13,y,5,3,S.gear>.95?K.green:K.greenDk);rect(cx+28,y,5,3,S.stalled?K.red:K.redDk);
   }
   function resize(canvas,w,h){
-    W=w;H=h;ctx=canvas.getContext('2d');ready=false;drawn=false;
+    W=w;H=h;ctx=canvas.getContext('2d');ready=false;drawn=false;glassFit=ringCache=null;
   }
   function select(next){
-    if(type!==next){type=next;ready=false;}
+    if(type!==next){type=next;ready=false;glassFit=ringCache=null;}
   }
   function prepare(){
     if(ready)return;
@@ -381,15 +406,16 @@ const Cockpit = (function (fleet) {
 
   // ── head-up display: collimated, so the ladder sits on the real horizon ──
   function hud(S, env, oy, glass) {
+    const room=env.room,combat=room?.combat && room.self;
     if(bareGlass){
       if(!glass){
         const y=y0+5+oy,left=cx-64,right=cx+26;
         text('SPD '+Math.round(S.speed*3.6),left,y,K.tick);text('ALT '+Math.round(S.pos[1]),right,y,K.tick);
         if(S.stalled||S.agl<60&&S.vs< -4)text(S.stalled?'STALL':'PULL UP',cx-13,y-9,K.hudWarn);
       }
-      return;
+      if(glass || !combat)return;
     }
-    const hx0 = cx - Math.min(62, (W >> 1) - 46), hx1 = W - 1 - hx0, hy1 = shieldY(cx) - 2 + oy, hy0 = Math.max(30 + oy, hy1 - 132);
+    const fit=glassLayout(),hx0=fit.left,hx1=fit.right,hy1=fit.bottom+oy,hy0=fit.top+oy;
     if(glass){
       for(let y=Math.max(0,hy0);y<=Math.min(H-1,hy1);y++)for(let x=hx0;x<=hx1;x++){
         const pixel=y*W+x;if(!T[pixel])T[pixel]=K.glass;
@@ -402,12 +428,36 @@ const Cockpit = (function (fleet) {
       return;
     }
     const cam = env.cam, B = cam.B, tanF = Math.tan(cam.fov / 2), sc = H / 2 / tanF, g = K.hud;
-    const proj = (az, el) => {
-      const ce = Math.cos(el), d0 = Math.sin(az) * ce, d1 = Math.sin(el), d2 = -Math.cos(az) * ce;
+    const projectDirection = (d0,d1,d2) => {
       const zc = d0 * B.f[0] + d1 * B.f[1] + d2 * B.f[2]; if (zc < 0.25) return null;
-      return [W / 2 + (d0 * B.r[0] + d1 * B.r[1] + d2 * B.r[2]) / zc * sc, H / 2 - (d0 * B.u[0] + d1 * B.u[1] + d2 * B.u[2]) / zc * sc + oy];
+      return [W / 2 + (d0 * B.r[0] + d1 * B.r[1] + d2 * B.r[2]) / zc * sc, H / 2 - (d0 * B.u[0] + d1 * B.u[1] + d2 * B.u[2]) / zc * sc];
     };
+    const proj=(az,el)=>{const ce=Math.cos(el);return projectDirection(Math.sin(az)*ce,Math.sin(el),-Math.cos(az)*ce);};
     CL = [hx0 + 2, hy0 + 16, hx1 - 2, hy1 - 2];
+    function drawAim(){
+      CL=[hx0+2,hy0+16,hx1-2,hy1-2];
+      const axes=env.basis;
+      const n=axes?projectDirection(...axes.f):proj(S.yaw,S.pitch);
+      if(n){
+        const nx=Math.round(n[0]),ny=Math.round(n[1]);
+        arc(nx,ny,3,0,Math.PI*2,g);rect(nx-9,ny,5,1,g);rect(nx+5,ny,5,1,g);rect(nx,ny-6,1,3,g);
+      }
+      const ring=combat && (room.weapon==='laser'?sight.laser:sight.profiles[room.weapon]);
+      if(axes && ring){
+        const charge=room.weapon==='laser'?Math.floor(room.self.lock*100):room.marks.get(room.target)||0;
+        const color=charge>=100?K.hudWarn:charge?K.hud:K.tick;
+        const points=captureContour(cam,axes,ring.ring,projectDirection);
+        for(const offset of [1,0]){
+          let previous=points[points.length-1];
+          for(const point of points){
+            if(point && previous)line(previous[0],previous[1]+offset,point[0],point[1]+offset,offset?K.plateLo:color);
+            previous=point;
+          }
+        }
+        if(charge){const label=charge>=100?'LOCK':charge+'%';text(label,cx-(textW(label)>>1),hy1-9,color);}
+      }
+    }
+    if(bareGlass){drawAim();CL=null;return;}
     // pitch ladder
     for (let e = -80; e <= 80; e += 10) {
       const el = rad(e), a0 = rad(e === 0 ? 3.2 : 2.6), a1 = rad(e === 0 ? 17 : 8.5);
@@ -419,9 +469,6 @@ const Cockpit = (function (fleet) {
         if (e !== 0 && sgn > 0) text(Math.abs(e), Math.round(q[0]) + 3, Math.round(q[1]) - 2, g);
       }
     }
-    // where the nose points
-    const n = proj(S.yaw, S.pitch);
-    if (n) { const nx = Math.round(n[0]), ny = Math.round(n[1]); arc(nx, ny, 3, 0, Math.PI * 2, g); rect(nx - 9, ny, 5, 1, g); rect(nx + 5, ny, 5, 1, g); rect(nx, ny - 6, 1, 3, g); }
     CL = [hx0 + 1, hy0 + 1, hx1 - 1, hy1 - 1];
     // heading tape
     let hd = (S.yaw * 180 / Math.PI) % 360; if (hd < 0) hd += 360;
@@ -433,16 +480,16 @@ const Cockpit = (function (fleet) {
     }
     px(cx, hy0 + 14, g); rect(cx - 1, hy0 + 15, 3, 1, g); rect(cx - 2, hy0 + 16, 5, 1, g);
     // speed, height and the small print
-    const my = Math.round((hy0 + hy1) / 2) + 6;
+    const my = W<H || hx1-hx0<155?hy1-24:Math.round((hy0+hy1)/2)+6;
     const box = (x, s, label) => { const w = 23; rect(x, my - 3, w, 1, g); rect(x, my + 7, w, 1, g); rect(x, my - 3, 1, 11, g); rect(x + w - 1, my - 3, 1, 11, g); text(s, x + w - 3 - textW(s), my, g); text(label, x + 1, my - 10, g); };
     box(hx0 + 4, String(Math.round(S.speed * 3.6)), 'SPD');
     box(hx1 - 26, String(Math.round(S.pos[1] / 10) * 10), 'ALT');
     text('G ' + S.g.toFixed(1), hx0 + 5, hy1 - 9, g);
     const ragl = Math.round(S.agl / 10) * 10; if (ragl < 2000) { const s = 'R ' + ragl; text(s, hx1 - 4 - textW(s), hy1 - 9, g); }
     if (S.boost > 0.3) text('AB', hx0 + 5, my + 11, K.hudWarn);
-    if (S.agl < 60 && S.vs < -4 && (S.time * 3 % 1) < 0.6) { const s = 'PULL UP'; text(s, cx - (textW(s) >> 1), my + 22, K.hudWarn); }
-    if (S.stalled) text('STALL', cx - 10, hy1 - 9, K.hudWarn);
-    CL = null;
+    if (S.agl < 60 && S.vs < -4 && (S.time * 3 % 1) < 0.6) { const s = 'PULL UP'; text(s, cx - (textW(s) >> 1), hy1-19, K.hudWarn); }
+    else if(S.stalled)text('STALL',cx-10,hy1-19,K.hudWarn);
+    drawAim();CL = null;
   }
 
   function draw(k, S, inp, env) {
@@ -474,7 +521,7 @@ const Cockpit = (function (fleet) {
     if(bank==='six')drawSix(S,env,oy);
     else drawBank(S,oy);
     if(partial){
-      const top=Math.max(0,Math.max(30+oy,shieldY(cx)-134+oy));
+      const top=Math.max(0,glassLayout().top+oy);
       ctx.putImageData(img,0,0,dirtyLeft,top,dirtyRight-dirtyLeft,H-top);
     }else ctx.putImageData(img,0,0);
     lastOffset=seated?oy:NaN;
@@ -585,10 +632,10 @@ const Cockpit = (function (fleet) {
 
   // Four rows cover the largest positive panel jolt. Transitions use the whole view.
   function view(fovBoost){
-    const fov=1.32+.08*fovBoost;
-    const tanDown=(1-windscreenHeight()-.07)*Math.tan(fov/2);
+    const fit=glassLayout(),fov=fit.fov+.08*fovBoost;
+    const tanDown=(1-2*fit.aimY/H)*Math.tan(fov/2);
     return {fov,tanDown};
   }
   return {resize,select,draw,view,windscreenHeight,coveredRows:()=>ready?Math.max(0,H-solid-4):0};
-})(typeof module==='undefined'?Flight.fleet:require('./flight.js').fleet);
+})(typeof module==='undefined'?Flight.fleet:require('./flight.js').fleet,typeof module==='undefined'?Sight:require('./sight.js'));
 if(typeof module==='undefined')window.Cockpit=Cockpit;else module.exports=Cockpit;

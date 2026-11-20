@@ -9,6 +9,7 @@
 <script src="airfields.js"></script>
 <script src="flight.js"></script>
 <script src="airframes.js"></script>
+<script src="sight.js"></script>
 <script src="cockpit.js"></script>
 <script src="pilot-stick.js"></script>
 <script src="lake.js"></script>
@@ -18,7 +19,6 @@
 <script src="peer-pose.js"></script>
 <script src="room.js"></script>
 <script src="land-surface.js"></script>
-<script src="sight.js"></script>
 <script src="sound.js"></script>
 <script src="scope.js"></script>
 <style>
@@ -1003,7 +1003,8 @@ const PLANE = {
       });
       $('part-values').replaceChildren(...rows);
     }
-    $('damage-panel').hidden=!inspectParts && now>=damageUntil;
+    const compactCockpit=cam.wCockpit>.985 && innerWidth<innerHeight;
+    $('damage-panel').hidden=!inspectParts && (compactCockpit || now>=damageUntil);
     const worst=componentNames.reduce((a,b)=>c[b]<c[a]?b:a);
     $('damage-message').textContent=body.damaged?'受损 · '+Airfields.labels[worst]+' '+c[worst]+'%　7 查看机体':'';
     $('service-note').textContent=body.service>0?'地勤检修 '+Math.min(6,body.service).toFixed(1)+' / 6 s':body.damaged?'机场停稳并收油至怠速可检修':'各部件正常';
@@ -1584,7 +1585,7 @@ const PLANE = {
     gl.bindVertexArray(quadVAO); gl.drawArrays(gl.TRIANGLES, 0, 3);
     if(covered)gl.disable(gl.SCISSOR_TEST);
 
-    if (window.Cockpit) Cockpit.draw(cam.wCockpit, S, null, { groundAt, cam });
+    if (window.Cockpit) Cockpit.draw(cam.wCockpit, S, null, {groundAt,cam,basis:B,room});
   }
 
   // ── input ──
@@ -1609,6 +1610,7 @@ const PLANE = {
     outfit.close();$('lake-chart').hidden=true;
     watchId=null;onlineSortie=false;$('title').classList.remove('gone');S.view=S.prev=0;S.viewT=1;flareFans.length=0;
     releaseKeys(); flying=false; room.leave(); $('hangar').hidden=false; $('strip').hidden=true;
+    $('strip').classList.remove('seated');
     $('scope').hidden=true;$('launch-note').textContent='';displayCard();$('mode').focus();
   }
   function displayCard(){
@@ -1782,8 +1784,10 @@ const PLANE = {
     }
   }
   let nextReadout=0;
+  const patrolActions={patrol:'巡航',regroup:'追赶目标',approach:'接近目标',pass:'交会拉开',space:'拉开间距',escape:'避开光圈',recover:'恢复高度'};
   function showReadout(now) {
     if(now<nextReadout) return; nextReadout=now+150;
+    $('strip').classList.toggle('seated',cam.wCockpit>.985);
     if(!room.combat&&!body.grounded)surveyPass(now);
     if(watchId && (!room.peers.has(watchId)||room.peers.get(watchId).hp===0))watchId=null;
     $('callsign').textContent=(room.name||soloName)+'　'+Flight.fleet[body.type].name+'  /  '+room.status;
@@ -1822,6 +1826,10 @@ const PLANE = {
     if(room.mode==='pve'){
       const m=room.mission;
       $('activity').textContent=!m||!m.wave?'巡逻机正在入场':m.countdown?(m.wave===3?'三波全清 · 巡逻完成！　新一轮 ':'本波已清空　下一波 ')+m.countdown+' s':'湖区巡逻　波次 '+m.wave+'/3　剩余 '+m.remaining+'/'+m.total+' 架 AI';
+      const contact=m?.contact;
+      if(contact && contact.id===room.target && room.peers.get(contact.id)?.hp){
+        $('activity').textContent+='　'+(patrolActions[contact.route]||'飞行')+' · 对手挂载 '+Outfit.describe(contact.kit,contact.weapon);
+      }
     }else if(room.combat&&self){
       const beacon=self.beacon;
       $('activity').textContent=!room.peers.size?'单人自由飞行　·　房间码 '+room.code:star?(carrier?'持星 '+(carrier.name||room.name)+'　'+star.seconds+'/8 秒':'等待持星者')+'　星分 '+self.beacons:'争夺 '+Lake.sites[beacon.site].name+' · '+beacon.left+'s　'+(beacon.count>1?'争夺中':beacon.hold?'占领 '+beacon.hold.toFixed(1)+'/4s':beacon.count?'有人占领':'空闲')+'　信标分 '+self.beacons;
