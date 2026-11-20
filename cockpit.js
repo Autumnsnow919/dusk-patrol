@@ -124,6 +124,11 @@ const Cockpit = (function (fleet) {
   let G = {};
   // Expanded high-speed sector; preserve extra needle travel for approach speeds.
   const asiA=v=>type==='rv8a'?rad(-140+280*Math.min(360,v)/360):rad(-140+Math.min(800,v)*.21+Math.max(0,Math.min(1600,v-800))*.07);
+  const panelHeight=fit=>Math.max(132,Math.min(158,Math.round(H*.43)))+fit[0];
+  function windscreenHeight(){
+    const fit=CockpitLayouts.shapes[CockpitLayouts.fits[type][0]];
+    return (H-panelHeight(fit)-fit[1])/H;
+  }
   function layout() {
     [bank,canopy]=CockpitLayouts.fits[type];
     shape=CockpitLayouts.shapes[bank];
@@ -131,7 +136,7 @@ const Cockpit = (function (fleet) {
     const rgb=fleet[type].color;
     const metal=(level)=>C('#'+rgb.map((v,i)=>Math.round(level*(.52+.65*v)*[.82,1.04,1.13][i]).toString(16).padStart(2,'0')).join(''));
     K.p1=metal(39);K.p2=metal(46);K.plate=metal(53);K.plateHi=metal(83);
-    cx = W >> 1; PH = Math.max(132, Math.min(158, Math.round(H * 0.43)))+shape[0]; y0 = H - PH; wide = W >= 392;
+    cx = W >> 1; PH=panelHeight(shape); y0 = H - PH; wide = W >= 392;
     const span=Math.min(shape[3],cx-8);
     stations=(CockpitLayouts.banks[bank]||[]).map(([kind,offset,width])=>{
       const half=Math.round(width*span),x=cx+Math.round(offset*span);
@@ -579,6 +584,11 @@ const Cockpit = (function (fleet) {
   }
 
   // Four rows cover the largest positive panel jolt. Transitions use the whole view.
-  return {resize,select,draw,coveredRows:()=>ready?Math.max(0,H-solid-4):0};
+  function view(fovBoost){
+    const fov=1.32+.08*fovBoost;
+    const tanDown=(1-windscreenHeight()-.07)*Math.tan(fov/2);
+    return {fov,tanDown};
+  }
+  return {resize,select,draw,view,windscreenHeight,coveredRows:()=>ready?Math.max(0,H-solid-4):0};
 })(typeof module==='undefined'?Flight.fleet:require('./flight.js').fleet);
 if(typeof module==='undefined')window.Cockpit=Cockpit;else module.exports=Cockpit;

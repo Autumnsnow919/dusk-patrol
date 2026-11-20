@@ -32,16 +32,16 @@ function spawn(slot,type,cooperative) {
 const rounded=(vector,scale)=>vector.map(value=>Math.round(value*scale)/scale);
 class Arena {
   constructor(now,rule='beacon') {
-    this.mission=rule==='waves'?new PatrolWaves():null;
+    this.mission=rule==='waves'?new PatrolWaves(weapons,groundAt):null;
     this.rule=rule;this.starId=null;this.starTime=0;
     this.time=0; this.matchTime=0; this.last=now; this.acc=0; this.players=new Map(); this.events=[]; this.tracers=[];this.tracerId=0;this.shots=[]; this.shotId=0; this.serial=0; this.holder=null; this.hold=0; this.zoneCount=0;
   }
-  add(id,type='comet',name=id,botSlot=null) {
+  add(id,type='comet',name=id,botSlot=null,kit=Outfit.standard) {
     if(!Object.hasOwn(Flight.fleet,type)||!Flight.fleet[type].pvp)throw new Error('Invalid arena airframe');
     Contact.prepare(type);
     const slots=new Set([...this.players.values()].map(player=>player.slot));
     const slot=botSlot??[0,4,2,6,1,5,3,7].find(value=>!slots.has(value));
-    const player={id,type,slot,name,bot:botSlot!==null,assists:0,kills:0,deaths:0,life:0,kit:Outfit.standard,beacons:0,refitAt:0};
+    const player={id,type,slot,name,bot:botSlot!==null,assists:0,kills:0,deaths:0,life:0,kit,beacons:0,refitAt:0};
     this.players.set(id,player); this.reset(player);
     return player;
   }
@@ -73,15 +73,18 @@ class Arena {
     }
     if(player.autoFocus && !player.fire){
       // Choose the room avatar nearest the center of the on-screen reticle.
-      let best=Infinity;
+      let best=Infinity,previous=null,previousOffset=Infinity;
       const {pos,basis}=player.body;
       for(const peer of this.players.values()){
         if(!eligible(peer))continue;
         const dx=peer.body.pos[0]-pos[0],dy=peer.body.pos[1]-pos[1],dz=peer.body.pos[2]-pos[2];
         const ahead=dx*basis.f[0]+dy*basis.f[1]+dz*basis.f[2];
-        const offset=(dx*dx+dy*dy+dz*dz)/(ahead*ahead);
+        const offset=Math.max(0,(dx*dx+dy*dy+dz*dz)/(ahead*ahead)-1);
         if(offset<best){best=offset;requested=peer;}
+        if(peer.id===player.focus){previous=peer;previousOffset=offset;}
       }
+      // Two nearly overlapping nameplates should not swap the highlighted avatar every tick.
+      if(previous && previousOffset<=(Math.sqrt(best)+spec.ring*.05)**2)requested=previous;
     }
     if(eligible(requested)&&!marks.has(requested.id)){
       if(marks.size===Sight.trackSlots)marks.delete([...marks.keys()].at(-1));
@@ -99,9 +102,11 @@ class Arena {
   input(player,data) {
     const controls={};
     for(const axis of Object.keys(silent)) {
-      if(![-1,0,1].includes(data.controls?.[axis])) return false;
+      if(!Number.isFinite(data.controls?.[axis])||Math.abs(data.controls[axis])>1)return false;
       controls[axis]=data.controls[axis];
     }
+    if(data.controls.keyboard!==undefined && typeof data.controls.keyboard!=='boolean')return false;
+    controls.keyboard=data.controls.keyboard===true;
     if(!Object.hasOwn(weapons,data.weapon)) return false;
     if(data.controls.vector!==undefined && typeof data.controls.vector!=='boolean')return false;
     if(data.controls.trim!==undefined && ![-1,0,1].includes(data.controls.trim))return false;

@@ -10,6 +10,7 @@
 <script src="flight.js"></script>
 <script src="airframes.js"></script>
 <script src="cockpit.js"></script>
+<script src="pilot-stick.js"></script>
 <script src="lake.js"></script>
 <script src="outfit.js"></script>
 <script src="chart.js"></script>
@@ -118,6 +119,7 @@ body.touch .hints.at-bottom { bottom: auto; top: 56px; }
       <label>房间码<input id="channel" placeholder="留空单飞" maxlength="16" pattern="[A-Za-z0-9\-]{1,16}" autocomplete="off"></label>
       <button id="launch" class="corner" type="submit" disabled>正在准备地形…</button>
       <div id="airframe-card"><strong id="trait-title"></strong> <small id="trait-description"></small></div>
+      <div id="kit-bay"><button type="button" id="edit-kit" aria-controls="outfit">L　配装</button><span id="kit-summary"></span></div>
       <small id="brief-mode"></small>
       <div id="launch-note" role="status"></div>
     </form>
@@ -127,14 +129,15 @@ body.touch .hints.at-bottom { bottom: auto; top: 56px; }
     <canvas id="map-paper" width="336" height="336" aria-label="北向地形、地标和编队位置图"></canvas>
     <button id="next-site" type="button">K　下一航点</button><button id="chart-range" type="button">O　全域航图</button><p id="map-note"></p><div id="map-score"></div>
   </section>
-  <section id="outfit" class="flight-panel corner" hidden aria-label="战局配装">
-    <header><h3>战局配装</h3><output aria-live="polite"></output></header>
+  <section id="outfit" class="flight-panel corner" tabindex="-1" hidden aria-label="飞机配装">
+    <header><h3>飞机配装</h3><output aria-live="polite"></output></header>
+    <div class="kit-presets" aria-label="配装起点"></div>
     <div class="kit-list"></div>
-    <p>1–6、8、9、− 选择或卸下。战斗中换装需要 5 秒，期间可照常飞行。</p>
+    <p id="kit-help"></p>
     <button class="kit-apply" type="button">Enter　应用配装</button><button class="kit-close" type="button">Esc　取消</button>
   </section>
   <aside id="damage-panel" hidden aria-label="机体损伤图"><strong>机体状态</strong><canvas id="damage-plan" width="80" height="74"></canvas><div id="part-values"></div><small id="service-note"></small></aside>
-  <aside id="strip" class="corner" hidden><strong id="callsign"></strong><br><span id="telemetry"></span><br><span id="wingmen"></span><div id="combat-state"></div><div id="waypoint"></div><div id="damage-message"></div><div id="activity"></div><div id="trait-state"></div><div id="perf"></div></aside>
+  <aside id="strip" class="corner" hidden><strong id="callsign"></strong><br><span id="telemetry"></span><br><span id="wingmen"></span><div id="stores"></div><div id="combat-state"></div><div id="waypoint"></div><div id="damage-message"></div><div id="activity"></div><div id="trait-state"></div><div id="perf"></div></aside>
 </main>
 <script src="terrain.js"></script>
 <script>const {WORLD,genBand,bakeTex,genCloud,makeHeightSampler}=LakeTerrain;</script>
@@ -856,7 +859,7 @@ const PLANE = {
     sceneTarget=fit(sceneTarget,IW,IH,false);surfaceTarget=fit(surfaceTarget,landW,landH,false);
     landTarget=fit(landTarget,landW===IW&&landH===IH?0:landW,landH,true);
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    const uiScale=Math.min(foreground,base+1,w/210,h/200);
+    const uiScale=Math.min(foreground,base+1,w/210,h/300);
     if(scaleCanvas(uic,Math.ceil(w/uiScale),Math.ceil(h/uiScale))||!uiInitialized){
       Cockpit.resize(uic,uic.width,uic.height);uiInitialized=true;
     }
@@ -935,6 +938,7 @@ const PLANE = {
   let body = Flight.create('tern'), chaseQuat = body.quat.slice(), accumulator = 0, flying = false, notice = '', noticeUntil = 0;
   let impactText='',impactUntil=0;
   const room = new FlightRoom(), keys = new Set(), scope=new DuelScope($('scope'));
+  const stick=new PilotStick();
   const chart=new LakeChart($('map-paper')),outfit=new OutfitPanel($('outfit'));
   const trial={next:0,time:0,best:new Map(),course:Lake.courses[0]}, prior=[0,0,0];
   let navUntil=0,followBeacon=false,watchId=null,onlineSortie=false,soloName='飞行员';
@@ -943,12 +947,39 @@ const PLANE = {
   $('next-site').onclick=selectNextSite;
   function toggleRange(){chart.overview=!chart.overview;$('chart-range').textContent=chart.overview?'O　附近航图':'O　全域航图';nextReadout=0;}
   $('chart-range').onclick=toggleRange;
+  const sessionKits=new Map();
+  function savedKit(type){
+    if(sessionKits.has(type))return sessionKits.get(type);
+    try{const mask=Number(localStorage.getItem('dusk-kit-'+type));if(Outfit.valid(mask))return mask;}catch{}
+    return Outfit.standard;
+  }
+  function showKit(type,mask){
+    $('kit-summary').textContent=Flight.fleet[type].name+'　'+Outfit.describe(mask)+'　'+Outfit.cost(mask)+' / '+Outfit.budget+' 点';
+  }
+  function openKit(){
+    if(!flying&&$('launch').disabled)return;
+    const type=flying?body.type:$('airframe').value;
+    $('lake-chart').hidden=true;
+    outfit.open(flying?(room.pendingKit??room.kit):savedKit(type));
+    $('kit-help').textContent=(flying&&room.combat?'交战中换装需要 5 秒。':'配装按机型保存在本机，出动时直接带上。')+'数字键装卸，Enter 应用，Esc 取消。';
+    keys.delete('KeyJ');room.triggerTap=false;
+    $('hangar').inert=!flying;outfit.element.focus();
+  }
+  function closeKit(){
+    $('hangar').inert=false;outfit.close();if(!flying)$('edit-kit').focus();
+  }
   function commitKit(){
     if(!Outfit.valid(outfit.draft))return;
-    room.pendingKit=outfit.draft;keys.delete('KeyJ');room.triggerTap=false;outfit.close();
+    const type=flying?body.type:$('airframe').value,mask=outfit.draft;
+    sessionKits.set(type,mask);
+    try{localStorage.setItem('dusk-kit-'+type,String(mask));}catch{}
+    if(flying&&room.combat){if(mask!==room.kit||room.pendingKit!==null)room.pendingKit=mask;}
+    else if(flying){room.kit=mask;if(!Outfit.has(mask,room.weapon))room.selectWeapon(Outfit.first(mask));}
+    showKit(type,mask);nextReadout=0;closeKit();
   }
   outfit.apply.onclick=commitKit;
-  $('outfit').querySelector('.kit-close').onclick=()=>outfit.close();
+  $('outfit').querySelector('.kit-close').onclick=closeKit;
+  $('edit-kit').onclick=openKit;
   let duelLife=0,displayPerf=false,frameMs=16.7;
   let inspectParts=false,lastCondition='',damageUntil=0;
   const healthy=Airfields.freshCondition(),componentNames=Object.keys(healthy);
@@ -979,7 +1010,9 @@ const PLANE = {
   }
   let gearRequest=false;
   const visitedFields=new Set(),waveHistory=new Map();
-  const readControls=()=>({pitch:axisKey('KeyS','KeyW'),roll:axisKey('KeyD','KeyA'),yaw:axisKey('KeyE','KeyQ'),throttle:axisKey('KeyR','KeyF'),vector:keys.has('KeyV'),gear:gearRequest,brake:keys.has('KeyZ'),trim:axisKey('Period','Comma')});
+  const readControls=channel=>Object.assign(stick.sample(channel,performance.now()),{vector:keys.has('KeyV'),gear:gearRequest,brake:keys.has('KeyZ'),trim:axisKey('Period','Comma')});
+  const wireControls=()=>readControls('wire');
+  function releaseKeys(){keys.clear();stick.reset(performance.now());}
   room.onState=self=>{
     const fresh=self.life!==duelLife;
     if(fresh){resetFlight(self.type,self.pos,0);duelLife=self.life;}
@@ -1057,8 +1090,8 @@ const PLANE = {
     if(!flying && worldReady){
       body.pos[0]+=body.vel[0]*dt*.55;body.pos[2]+=body.vel[2]*dt*.55;
     }
-    const controls=readControls();
     if (flying && room.self?.hp!==0) accumulator += dt;
+    const controls=accumulator+1e-12>=Flight.tick?readControls('local'):null;
     while (accumulator + 1e-12 >= Flight.tick) {
       const touring=!room.combat;
       if(touring){for(let i=0;i<3;i++)prior[i]=body.pos[i];}
@@ -1071,7 +1104,7 @@ const PLANE = {
       if (body.crashed || Lake.collide(body) || (!body.grounded && !body.softApproach && body.pos[1]<420 && body.pos[1] <= Math.max(0,groundAt(body.pos[0],body.pos[2]))+3)) {
         resetFlight(body.type,[body.pos[0],Math.max(body.pos[1]+220,Math.max(0,groundAt(body.pos[0],body.pos[2]))+450),body.pos[2]],S.yaw);
         trial.next=0;trial.time=0;
-        notice='碰撞 · 已在安全高度重新出发'; noticeUntil=performance.now()+4000; keys.clear();
+        notice='碰撞 · 已在安全高度重新出发'; noticeUntil=performance.now()+4000; releaseKeys();
       }else{
         if(body.grounded && body.touchdowns && body.recordedTouch!==body.touchdowns){
           body.recordedTouch=body.touchdowns;
@@ -1227,9 +1260,10 @@ const PLANE = {
     // sits under the forward glass, ahead of the tandem canopy crossbar.
     const prop=body.type==='rv8a'||body.type==='sail',tandemSeat=body.type==='j16';
     const eye = toWorld(B,[Math.sin(S.time*61)*sh,(prop?1.43:tandemSeat?1.51:PLANE.EYE[1])+Math.sin(S.time*47)*sh,prop?.45:tandemSeat?5.25:PLANE.EYE[2]]);
-    // the pilot looks a little down over the nose, so the land stays in the glass
-    const ca = Math.cos(0.19), sa = Math.sin(0.19);
-    return { pos: eye, B: { r: B.r, u: add(mul(B.u, ca), mul(B.f, sa)), f: add(mul(B.f, ca), mul(B.u, -sa)) }, fov: 1.16 + 0.08 * S.boost };
+    // Place the nose halfway up the usable windscreen for this instrument panel.
+    const {fov,tanDown}=Cockpit.view(S.boost);
+    const ca=1/Math.sqrt(1+tanDown*tanDown),sa=tanDown*ca;
+    return {pos:eye,B:{r:B.r,u:add(mul(B.u,ca),mul(B.f,sa)),f:add(mul(B.f,ca),mul(B.u,-sa))},fov};
   }
   function updateCamera(dt, B) {
     if(S.view===3)orbit.input(dt,axisKey('ArrowRight','ArrowLeft'),axisKey('ArrowUp','ArrowDown'),axisKey('BracketRight','BracketLeft'));
@@ -1567,18 +1601,19 @@ const PLANE = {
   function updateHints() {
     if(S.view===3){
       $('hints').textContent=(orbit.anchor?'定点观测 · G 恢复环绕':'自由环绕 · 方向键转镜头　G 定点观测')+'　I 前方通场机位　[ / ] 缩放　0 侧视复位　C 返回';
-    }else $('hints').textContent=(room.combat?'1–6、8、9、− 武器　J 开火　T 目标　X 热诱弹　L 配装　B 导航':'W/S 俯仰　 A/D 滚转　 Q/E 偏航　 R/F 油门')+'　U 起落架　Z 轮刹　7 机体　N 航图　K 航点　C 镜头　H 机库';
+    }else $('hints').textContent=(room.combat?'Tab 换武器　J 开火　T 目标　X 热诱弹':'W/S 俯仰　A/D 滚转　Q/E 偏航　R/F 油门')+'　Shift 细控　L 配装　U 起落架　N 航图　C 镜头　H 机库';
   }
   function park() {
     inspectParts=false;damageUntil=0;$('damage-panel').hidden=true;
     audio.setActive(false);
     outfit.close();$('lake-chart').hidden=true;
     watchId=null;onlineSortie=false;$('title').classList.remove('gone');S.view=S.prev=0;S.viewT=1;flareFans.length=0;
-    keys.clear(); flying=false; room.leave(); $('hangar').hidden=false; $('strip').hidden=true;
+    releaseKeys(); flying=false; room.leave(); $('hangar').hidden=false; $('strip').hidden=true;
     $('scope').hidden=true;$('launch-note').textContent='';displayCard();$('mode').focus();
   }
   function displayCard(){
     const spec=Flight.fleet[$('airframe').value];
+    showKit($('airframe').value,savedKit($('airframe').value));
     $('trait-title').textContent=spec.trait+'　/　'+(spec.highPower?'超声速 · R 满油门':'亚声速')+'　/　'+Math.round(spec.cruise*3.6)+' km/h 巡航起始速度';
     $('trait-description').textContent=spec.description;
     $('airframe-card').style.setProperty('--paint','rgb('+spec.color.map(value=>Math.round(value*255)).join(',')+')');
@@ -1606,13 +1641,14 @@ const PLANE = {
   $('airframe').addEventListener('change',displayCard);
   fillHangar();
   $('dispatch').addEventListener('submit',async event=>{
-    event.preventDefault(); if(!worldReady || $('launch').disabled) return;
+    event.preventDefault(); if(!worldReady || $('launch').disabled || !outfit.element.hidden) return;
     const name=$('pilot-name').value.normalize('NFKC').trim();
     if(name&&!/^[\p{L}\p{N} _·-]{1,12}$/u.test(name)){$('launch-note').textContent='名字限 1–12 个汉字、字母、数字、空格或短横线';$('pilot-name').focus();return;}
     try{localStorage.setItem('dusk-pilot',name);}catch{}
     audio.unlock();
     soloName=name||'飞行员';watchId=null;
     const type=$('airframe').value, channel=$('channel').value.trim().toUpperCase();
+    const kit=savedKit(type);
     const online=channel!=='' || $('mode').value!=='tour';
     $('mode').disabled=$('airframe').disabled=$('launch').disabled=true; $('launch-note').textContent=online?'正在联系房主…':'';
     try {
@@ -1622,7 +1658,7 @@ const PLANE = {
       if(online) {
         if(location.protocol==='file:') throw new Error('请先运行 start-lan.cmd，再用浏览器打开终端显示的地址。单人 PvE 也可用本机地址开房。');
         const mode=$('mode').value;
-        const ticket=await room.join(channel,type,mode==='crown'?'pvp':mode,name,mode==='pve'?'waves':mode==='crown'?'crown':'beacon'); if(!ticket) return;
+        const ticket=await room.join(channel,type,mode==='crown'?'pvp':mode,name,mode==='pve'?'waves':mode==='crown'?'crown':'beacon',kit); if(!ticket) return;
         const lead=ticket.lead;
         slot=ticket.slot;
         const occupied=lead&&Airfields.at(lead.pos[0],lead.pos[2]);
@@ -1638,45 +1674,57 @@ const PLANE = {
         pos[2]+=Math.sin(yaw)*side*38+Math.cos(yaw)*Math.abs(side)*22;
         pos[1]=Math.max(pos[1],groundAt(pos[0],pos[2])+40);
         if(room.combat){pos=ticket.spawn;yaw=ticket.heading;}
-      } else room.leave();
+      } else {room.leave();room.kit=kit;room.selectWeapon(Outfit.first(kit));}
       resetFlight(type,pos,yaw);visitedFields.clear();loadSurvey();
       if(field){
         if(ramp)Airfields.park(body,field,slot);
         else body=Flight.approach(type,field);
         body.gearDown=gearRequest=true;S.pos=body.pos;chaseQuat=body.quat.slice();
       }
-      S.view=S.prev=1; S.viewT=1; notice=''; keys.clear(); flying=true;audio.setActive(!document.hidden);
+      S.view=S.prev=1; S.viewT=1; notice=''; releaseKeys(); flying=true;audio.setActive(!document.hidden);
       $('hangar').hidden=true; $('strip').hidden=false; $('title').classList.add('gone'); document.activeElement?.blur();
       Object.assign(trial,{next:0,time:0,best:new Map(),course:Lake.courses[0]});followBeacon=room.combat;chart.selected=followBeacon?2:Number($('depart').value);
-      duelLife=0; onlineSortie=online;$('scope').hidden=!onlineSortie;updateHints();last=performance.now();
+      duelLife=0; onlineSortie=online;$('scope').hidden=false;scope.next=0;updateHints();last=performance.now();
     } catch(error) {
       audio.setActive(false);
-      $('launch-note').textContent=error.reason==='mode'?'该房间已使用另一种玩法，请换房间码。':error.status===409?'房间已满，请更换房间码。':location.protocol==='file:'?error.message:'未能连接房间。请确认房主已启动新版服务。';
+      $('launch-note').textContent=error.reason==='version'?'房间版本不同，请更新房主并刷新游戏页面。':error.reason==='mode'?'该房间已使用另一种玩法，请换房间码。':error.status===409?'房间已满，请更换房间码。':location.protocol==='file:'?error.message:'未能连接房间。请确认房主已启动新版服务。';
     } finally { $('mode').disabled=$('airframe').disabled=$('launch').disabled=false; }
   });
   const flightKeys=new Set(['KeyW','KeyS','KeyA','KeyD','KeyQ','KeyE','KeyR','KeyF','KeyH','KeyM','KeyU','KeyZ','KeyI','Comma','Period','KeyP','KeyV','KeyJ','KeyT','KeyX','KeyC','KeyG','Digit0','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','BracketLeft','BracketRight','Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit7','Digit8','Digit9','Minus','KeyL','KeyK','KeyY','KeyN','KeyO','KeyB','Escape','Enter','Space']);
   addEventListener('keydown',event=>{
-    if(!flying || !flightKeys.has(event.code)) return;
+    const slot=Outfit.keys.indexOf(event.code);
+    if(!outfit.element.hidden){
+      if(event.code==='Tab')return;
+      if(slot>=0||['Enter','Escape','KeyL'].includes(event.code)){
+        if(event.code==='Enter' && event.target.closest?.('.kit-close,.kit-presets'))return;
+        event.preventDefault();if(event.repeat)return;
+        if(slot>=0)outfit.toggle(slot);
+        else if(event.code==='Enter')commitKit();else closeKit();
+        return;
+      }
+      if(!flying||event.code==='KeyJ'||event.code==='KeyN')return;
+    }
+    if(!flying){
+      if(event.code==='KeyL'&&!event.repeat&&!event.target.closest?.('input,textarea')){event.preventDefault();openKit();}
+      return;
+    }
+    if(event.code==='Tab' && outfit.element.hidden && $('lake-chart').hidden && !event.target.closest?.('button,input,select') && room.combat){
+      event.preventDefault();if(event.repeat)return;
+      const fitted=Outfit.items.filter(item=>Outfit.has(room.kit,item.id)),i=fitted.findIndex(item=>item.id===room.weapon);
+      room.selectWeapon(fitted[(i+(event.shiftKey?-1:1)+fitted.length)%fitted.length].id);nextReadout=0;return;
+    }
+    if(!flightKeys.has(event.code)&&!['ShiftLeft','ShiftRight'].includes(event.code))return;
     // Enter and Space retain normal activation for a focused panel button.
     if(event.target instanceof HTMLButtonElement && (event.code==='Enter'||event.code==='Space'))return;
     event.preventDefault(); if(event.repeat)return;
-    if(event.code==='KeyL' && room.combat){
-      if(outfit.element.hidden){$('lake-chart').hidden=true;outfit.open(room.pendingKit??room.kit);keys.delete('KeyJ');room.triggerTap=false;}
-      else outfit.close();return;
-    }
-    const slot=Outfit.keys.indexOf(event.code);
-    if(!outfit.element.hidden){
-      if(slot>=0){outfit.toggle(slot);return;}
-      if(event.code==='Enter'){commitKit();return;}
-      if(event.code==='Escape'){outfit.close();return;}
-      if(event.code==='KeyJ'||event.code==='KeyN')return;
-    }
+    if(event.code==='KeyL'){openKit();return;}
     if(event.code==='KeyO'&&!$('lake-chart').hidden){toggleRange();return;}
     if(event.code==='KeyN'){$('lake-chart').hidden=!$('lake-chart').hidden;nextReadout=0;return;}
     if(event.code==='KeyB'&&room.combat){navUntil=performance.now()+6000;followBeacon=true;nextReadout=0;return;}
     if(event.code==='KeyK'){selectNextSite();return;}
     if(event.code==='Escape'){$('lake-chart').hidden=true;return;}
     keys.add(event.code);
+    stick.change(keys,performance.now());
     if(event.code==='Space') setView(S.view+1);
     if(event.code==='KeyC')setView(S.view===3?returnView:3);
     if(S.view===3&&event.code==='KeyG'){waveHistory.clear();orbit.toggleAnchor(cam.pos,room.peers.get(watchId)?.displayPos??S.pos);updateHints();}
@@ -1701,16 +1749,20 @@ const PLANE = {
       }else displayPerf=!displayPerf;
     }
     if(room.combat){
-      if(slot>=0 && Outfit.has(room.kit,Outfit.items[slot].id))room.selectWeapon(Outfit.items[slot].id);
+      if(slot>=0){
+        if(Outfit.has(room.kit,Outfit.items[slot].id))room.selectWeapon(Outfit.items[slot].id);
+        else{notice=Outfit.items[slot].name+' 未装配 · L 换装';noticeUntil=performance.now()+1600;}
+        nextReadout=0;
+      }
       if(event.code==='KeyX')room.dodge=true;
       if(event.code==='KeyJ')room.pressTrigger();
       if(event.code==='KeyT')room.cycleTarget();
     }
     if(event.code==='KeyH') park();
   });
-  addEventListener('keyup',event=>keys.delete(event.code));
-  addEventListener('blur',()=>{keys.clear();room.triggerTap=false;audio.stopGun('self');});
-  document.addEventListener('visibilitychange',()=>{keys.clear();last=performance.now();room.triggerTap=false;audio.setActive(flying&&!document.hidden);});
+  addEventListener('keyup',event=>{if(keys.delete(event.code))stick.change(keys,performance.now());});
+  addEventListener('blur',()=>{releaseKeys();room.triggerTap=false;audio.stopGun('self');});
+  document.addEventListener('visibilitychange',()=>{releaseKeys();last=performance.now();room.triggerTap=false;audio.setActive(flying&&!document.hidden);});
   addEventListener('pagehide',()=>{audio.setActive(false);room.leave();});
   let surveyKey='';
   function loadSurvey(){
@@ -1748,6 +1800,9 @@ const PLANE = {
     });
     if(!room.combat)$('wingmen').textContent=(S.stalled?'迎角过大 · 失速　':'')+(now<noticeUntil?notice:peers.join('　')||(room.token?'等待僚机加入':'湖区自由飞行'));
     const self=room.self;
+    const stores=$('stores'),text=(room.combat?'挂载　':'观光 · 武器保险　')+Outfit.describe(room.kit,room.combat?room.weapon:null)+'　L 配装';
+    if(stores.textContent!==text)stores.textContent=text;
+    if(keys.has('ShiftLeft')||keys.has('ShiftRight'))$('telemetry').textContent+='　细控';
     if(room.mode==='pvp'&&self&&followBeacon&&!self.star)chart.selected=self.beacon.site;
     const site=Lake.sites[chart.selected];
     const target=!room.combat&&trial.next&&chart.selected===trial.course.site?trial.course.gates[trial.next]:null;
@@ -1778,16 +1833,21 @@ const PLANE = {
     if(room.combat && self){
       $('wingmen').textContent='战绩 '+self.kills+' / '+self.deaths+'　助攻 '+self.assists+'　HP '+self.hp+'　目标 '+(room.peers.get(room.target)?.name??'无');
       if(now<impactUntil)$('wingmen').textContent+='　'+impactText;
+      if(now<noticeUntil && notice.includes('未装配'))$('wingmen').textContent+='　'+notice;
       const tracked=room.peers.get(room.target);
       const distance=tracked?Math.hypot(...tracked.pos.map((v,i)=>v-S.pos[i])):Infinity;
       const missile=Sight.profiles[room.weapon];
       const charge=room.marks.get(room.target)||0;
       const laserHint=!tracked?'待选目标':distance>Sight.laser.reach?'射程外':self.lock?'照射 '+Math.floor(self.lock*100)+'%':'对入圆圈 · 按住 J';
-      const missileReadout=charge===100?'已锁定':charge?'捕获 '+charge+'%':!tracked?'待选目标':distance>(missile?.reach||0)?'射程外':distance<missile?.inner?'近距盲区':self.cool?'装填中':'对入瞄准圈';
+      const missileReadout=!tracked?'等待目标':distance>(missile?.reach||0)?'超出捕获距离':distance<missile?.inner?'近距盲区':
+        charge===100?(self.cool?'已锁定':'已锁定 · J 发射'):charge?'捕获 '+charge+'%':'将目标移入圈内';
       const warning=now<noticeUntil&&notice==='机炮拦截成功'?notice:self.revive?'击毁 · '+self.revive.toFixed(1)+' s 后重生':self.shield?'出生保护':self.incoming?'来袭 · X 热诱弹':self.warned?'锁定预警':self.prism?'镜阵展开':self.diverted?'诱偏成功':(!body.grounded && !runway && S.agl<45)||Math.hypot(S.pos[0]-900,S.pos[2]-1500)>Lake.arenaRadius-1200 || S.pos[1]>Lake.arenaCeiling-350?'接近赛场边界':'';
-      $('combat-state').textContent=warning+'　'+(Outfit.items.find(item=>item.id===room.weapon).name+(room.weapon==='laser'?' · '+laserHint:missile?' · '+missileReadout+'　跟踪 '+room.marks.size+'/'+Sight.trackSlots:room.weapon==='gun'&&tracked&&distance<=620?' · ◇ 预瞄':''))+
+      const changing=self.weapon!==room.weapon;
+      const status=room.pendingKit!==null?'提交配装中':self.refit?'换装 '+self.refit.toFixed(1)+'s':changing?'切换中':
+        self.cool?'冷却 '+self.cool.toFixed(1)+'s':self.hot&&room.weapon==='gun'||missile||self.revive||self.shield?'':'就绪';
+      $('combat-state').textContent=warning+'　'+(Outfit.items.find(item=>item.id===room.weapon).name+(changing?'':room.weapon==='laser'?' · '+laserHint:missile?' · '+missileReadout+'　跟踪 '+room.marks.size+'/'+Sight.trackSlots:room.weapon==='gun'&&tracked&&distance<=620?' · ◇ 预瞄':''))+
         (room.weapon==='gun'?'　'+(self.hot?'过热锁止 · 冷却中 ':'炮温 ')+Math.round(self.heat*100)+'%':'')+
-        (room.pendingKit!==null?' · 提交配装中':self.refit?' · 换装 '+self.refit.toFixed(1)+'s':self.hot&&room.weapon==='gun'?'':self.cool?' · 冷却 '+self.cool.toFixed(1)+'s':' · 就绪')+'　热诱弹 '+self.flares+'/12 · '+(self.puffs?'连放中':self.dodge?self.dodge.toFixed(1)+'s':self.flares?'就绪':'补充中');
+        (status?' · '+status:'')+'　热诱弹 '+self.flares+'/12 · '+(self.puffs?'连放中':self.dodge?self.dodge.toFixed(1)+'s':self.flares?'就绪':'补充中');
     }else $('combat-state').textContent=(body.type==='kite'||body.type==='rv8a')?'迎角 '+Math.round(body.alpha*180/Math.PI)+'°　升降率 '+S.vs.toFixed(1)+' m/s　滚转 '+Math.round(-body.rates[2]*180/Math.PI)+'°/s':'';
     $('perf').textContent=displayPerf?qualityNames[quality]+'　'+Math.round(1000/frameMs)+' FPS　'+frameMs.toFixed(1)+' ms　'+IW+'×'+IH+'　地景 '+landW+'×'+landH:'';
     const watched=room.peers.get(watchId),type=watched?.type||body.type,spec=Flight.fleet[type];
@@ -1846,9 +1906,9 @@ const PLANE = {
     if(flying) {
       frameMs+=.06*(clamp(raw*1000,1,250)-frameMs);
       if(keys.has('KeyX')&&room.combat)room.dodge=true;
-      room.sync(body,now,readControls(),keys.has('KeyJ'));showReadout(now);audio.update(body,S,cam,room,keys.has('KeyZ'),keys.has('KeyJ')&&room.weapon==='gun');
-      if(room.token)scope.draw(now,room,body,cam);
-      else if(onlineSortie){park();$('launch-note').textContent='房间连接已过期，请重新加入。';}
+      room.sync(body,now,wireControls,keys.has('KeyJ'));showReadout(now);audio.update(body,S,cam,room,keys.has('KeyZ'),keys.has('KeyJ')&&room.weapon==='gun');
+      if(onlineSortie&&!room.token){park();$('launch-note').textContent='房间连接已过期，请重新加入。';}
+      else scope.draw(now,room,body,cam,Lake.sites[chart.selected]);
     }
     if(quality!==0 || window.__noAdapt || raw>.25)return;
     overBudget=raw>.022?overBudget+dt:Math.max(0,overBudget-dt*.5);

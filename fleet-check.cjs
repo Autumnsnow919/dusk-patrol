@@ -4,6 +4,26 @@ const OrbitRig=require('./scope.js');
 const {Arena}=require('./arena.cjs');
 const {createServer}=require('./server.cjs');
 const neutral={pitch:0,roll:0,yaw:0,throttle:0};
+const PilotStick=require('./pilot-stick.js');
+{
+  const stick=new PilotStick(),keys=new Set(['KeyD']);
+  stick.change(keys,10);assert.equal(stick.sample('local',20).roll,.5);
+  keys.clear();stick.change(keys,30);
+  assert.equal(stick.sample('wire',65).roll,.308,'20 ms tap captured between two room packets');
+  assert.equal(stick.sample('local',70).roll,.2);
+  keys.add('ShiftLeft');keys.add('KeyD');keys.add('KeyS');stick.change(keys,70);
+  assert.equal(stick.sample('local',90).pitch,.35);
+  keys.add('KeyA');stick.change(keys,90);assert.equal(stick.sample('local',100).roll,0);
+  stick.reset(100);assert.equal(stick.sample('wire',200).roll,0);
+  for(const keyboard of [true,false]){
+    const b=Flight.create('swift',[0,1500,0],0),held={...neutral,roll:1,keyboard};
+    for(let i=0;i<120;i++)Flight.step(b,held,Flight.tick);
+    const travel=Math.abs(b.controls[2]);assert(travel>.99);
+    for(let i=0;i<12;i++)Flight.step(b,{...neutral,keyboard},Flight.tick);
+    const remaining=Math.abs(b.controls[2])/travel;
+    assert(keyboard?remaining<.23:remaining>.54);
+  }
+}
 const types=Object.keys(Flight.fleet).filter(type=>Flight.fleet[type].pvp);
 function run(type,frames,input){
   const body=Flight.create(type,[0,1500,0],0);
@@ -165,7 +185,7 @@ async function networkCheck(){
     assert.deepEqual(tourPeer.rig,tourPose.rig);assert.equal(tourPeer.type,'opal');
     for(const [i,type] of types.slice(7).entries())assert.equal((await join(type,'pvp','EXTRA'+Math.floor(i/8))).status,200);
     const tickets=await Promise.all([...types.slice(0,7),'kite'].map(type=>join(type)));
-    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===13));
+    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===14));
     assert.equal((await join('swift')).status,409);
     const results=await Promise.all(tickets.map(ticket=>call('sync',{controls:{...neutral,vector:true,pitch:1},weapon:'gun',type:'untrusted'},ticket.token)));
     results.forEach((state,index)=>{assert.equal(state.self.type,tickets[index].type);assert.equal(state.peers.length,7);});

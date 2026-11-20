@@ -2,6 +2,36 @@ const assert = require('node:assert/strict');
 const Flight = require('./flight.js');
 const {Arena} = require('./arena.cjs');
 const {createServer} = require('./server.cjs');
+const Outfit=require('./outfit.js');
+
+function exerciseDecisions(){
+  const game=new Arena(0,'waves'),one=game.add('one','tern'),two=game.add('two','swift');
+  game.tick(Flight.tick);game.time=4;const [a,b]=game.mission.drones;
+  function decide(){game.time+=.2;game.mission.update(game);}
+  decide();assert.notEqual(a.partner,b.partner,'co-op routes share coverage');
+  for(const p of [one,two])p.body.pos=[7100,1100,3000];
+  decide();assert.equal(a.route,'regroup');assert.equal(a.center[0],7100);
+  a.body.pos=[7100,90,3100];a.body.vel[1]=-12;
+  decide();assert.equal(a.route,'recover');assert(!a.fire);assert(a.controls.pitch>0);
+  b.body.pos=[7100,1100,3020];b.echoAt=game.time+2;
+  decide();assert.equal(b.weapon,'pulse');assert(b.fire);assert(Outfit.has(b.kit,b.weapon));
+  a.body.pos=[7090,1050,3015];a.hp-=10;decide();assert.notEqual(a.weapon,'prism');
+  game.time+=.71;decide();assert.equal(a.weapon,'prism');assert(a.fire);
+}
+exerciseDecisions();
+
+function rejoinTime(){
+  const game=new Arena(0,'waves'),leader=game.add('leader','j10');
+  // Keep the human at a repeatable meeting point. The NPCs fly the normal room physics.
+  for(let i=0;i<45*120;i++){
+    const t=i*Flight.tick;
+    leader.body.pos=[7100,1150,1500+450*Math.sin(t*.025)];
+    game.tick(Flight.tick);
+    if(game.mission.drones.some(d=>d.hp&&Math.hypot(d.body.pos[0]-leader.body.pos[0],d.body.pos[2]-leader.body.pos[2])<1000))return t;
+  }
+  assert.fail('patrol failed to rejoin the moving meeting point in 45 seconds');
+}
+console.log('First patrol aircraft within 1 km of the meeting point after '+rejoinTime().toFixed(1)+' s');
 
 function exerciseWaves() {
   const game = new Arena(0, 'waves');
@@ -30,6 +60,7 @@ function exerciseWaves() {
   assert(first.hp < enemyHp);
   for (const size of [2,3,4]) {
     assert.equal(game.mission.drones.length, size);
+    assert(game.mission.drones.every(d=>Outfit.valid(d.kit)&&d.pack.every(id=>Outfit.has(d.kit,id))));
     for (const drone of game.mission.drones) game.damage(pilot,drone,100);
     run(.25);
     const state = game.snapshot(pilot,0,0,[],true).mission;

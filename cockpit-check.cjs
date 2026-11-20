@@ -1,6 +1,7 @@
 const assert=require('node:assert/strict');
 const {createHash}=require('node:crypto');
 const Flight=require('./flight.js');
+const Sight=require('./sight.js');
 const cockpit=require('./cockpit.js');
 const env={groundAt:(x,z)=>100*Math.cos((x+z)/600),cam:{B:Flight.axes([0,0,0,1]),fov:1.16}};
 let state={pos:[0,620,0],speed:160,agl:510,vs:-2,yaw:0,pitch:0,roll:0,omega:0,slip:0,
@@ -24,6 +25,15 @@ for(const [width,height] of [[500,314],[210,200],[255,430]]){
     cockpit.select(type);
     state={...state,roll:0,pitch:0,g:1,shake:0,speed:160,time:0,stalled:false};
     for(const mix of [.1,.65,.99,1])cockpit.draw(mix,state,null,env);
+    if(height>=300){
+      for(const boost of [0,1]){
+        const {fov,tanDown}=cockpit.view(boost),tanF=Math.tan(fov/2),slope=Sight.ring;
+        const bottom=.5-(tanDown-slope)/(2*tanF*(1+tanDown*slope));
+        const top=.5-(tanDown+slope)/(2*tanF*(1-tanDown*slope));
+        assert(bottom*height+3<cockpit.windscreenHeight()*height,type+' lower capture arc must clear the panel');
+        assert(top*height>10,type+' upper capture arc must clear the canopy bow');
+      }
+    }
     // Silhouette alone must distinguish each fit, regardless of paint or nameplate.
     const mask=Buffer.alloc(width*height);
     for(let i=0;i<mask.length;i++)mask[i]=displayed[i*4+3]===255?1:0;

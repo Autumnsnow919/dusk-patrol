@@ -1,13 +1,16 @@
 const scopeRing=Array.from({length:24},(_,i)=>[Math.cos(i*Math.PI/12),Math.sin(i*Math.PI/12)]);
 class DuelScope {
   constructor(canvas){this.canvas=canvas;this.ctx=canvas.getContext('2d');this.next=0;this.peerAxes={r:[0,0,0],u:[0,0,0],f:[0,0,0]};}
-  draw(now,room,body,cam){
+  draw(now,room,body,cam,waypoint){
     if(now<this.next)return;
-    const interval=1000/60;
+    const navOnly=!room.combat && !room.peers.size;
+    const interval=1000/(navOnly?15:60);
     this.next=now+interval-(now-this.next)%interval;
     const c=this.canvas,g=this.ctx,w=Math.min(960,innerWidth),h=Math.round(innerHeight*w/innerWidth);
     if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
-    g.clearRect(0,0,w,h);g.font='500 12px "IBM Plex Mono", monospace';g.lineWidth=1;
+    if(navOnly&&this.navOnly)g.clearRect(w-111,37,111,126);else g.clearRect(0,0,w,h);
+    this.navOnly=navOnly;
+    g.font='500 12px "IBM Plex Mono", monospace';g.lineWidth=1;
     const focal=h/(2*Math.tan(cam.fov/2)),gold='#ffd884',cream='#fff3dc',teal='#8ed8c0',red='#ff9364',ink='#1b1326';
     function project(p){
       const x=p[0]-cam.pos[0],y=p[1]-cam.pos[1],z=p[2]-cam.pos[2];
@@ -28,13 +31,25 @@ class DuelScope {
     }
     const duel=room.combat,self=room.self,basis=Flight.axes(body.quat),target=room.peers.get(room.target);
     const rx=w-60,ry=90,R=40;
+    const range=duel?(Sight.profiles[room.weapon]?.reach||Sight.reach):4000;
     const showTarget=duel && target?.hp;
     const pos=showTarget?target.displayPos:null;
     const targetRange=pos?Math.hypot(pos[0]-body.pos[0],pos[1]-body.pos[1],pos[2]-body.pos[2]):Infinity;
     g.fillStyle='#18212df0';g.fillRect(rx-R-7,ry-R-7,2*R+14,2*R+(showTarget?39:23));
     g.strokeStyle='#537c79';circle([rx,ry],R);circle([rx,ry],R/2);
     path([[rx-R,ry],[rx+R,ry]]);path([[rx,ry-R],[rx,ry+R]]);
-    g.fillStyle=teal;g.fillText('N',rx+3,ry-R+9);g.fillText(room.weapon==='ribbon'?'3.6 km':'1.8 km',rx-R,ry+R+12);
+    g.fillStyle=teal;g.fillText('N',rx+3,ry-R+9);g.fillText((duel?'RAD ':'NAV ')+(range/1000)+' km',rx-R,ry+R+12);
+    if(!duel){
+      for(const field of Airfields.strips){
+        const dx=field.x-body.pos[0],dz=field.z-body.pos[2];
+        if(dx*dx+dz*dz<range*range){g.strokeStyle=teal;g.strokeRect(rx+dx*R/range-2,ry+dz*R/range-2,4,4);}
+      }
+      if(waypoint){
+        const dx=waypoint.pos[0]-body.pos[0],dz=waypoint.pos[2]-body.pos[2],scale=(R-3)/Math.max(range,Math.hypot(dx,dz));
+        const x=rx+dx*scale,y=ry+dz*scale;
+        g.strokeStyle=gold;path([[x,y-4],[x+4,y],[x,y+4],[x-4,y]],true);
+      }
+    }
     if(showTarget){
       const level=pos[1]-body.pos[1];
       g.fillStyle=gold;g.fillText((level>50?'↑ ':level< -50?'↓ ':'')+(targetRange<1000?Math.round(targetRange)+' m':(targetRange/1000).toFixed(1)+' km'),rx-R,ry+R+27);
@@ -43,7 +58,7 @@ class DuelScope {
     const labelRows=[];
     for(const peer of room.peers.values()){
       if(peer.hp===0)continue;
-      const p=peer.displayPos,dx=p[0]-body.pos[0],dz=p[2]-body.pos[2],horizontal=Math.hypot(dx,dz),range=room.weapon==='ribbon'?3600:1800,scale=R/Math.max(range,horizontal*1.04);
+      const p=peer.displayPos,dx=p[0]-body.pos[0],dz=p[2]-body.pos[2],horizontal=Math.hypot(dx,dz),scale=R/Math.max(range,horizontal*1.04);
       const x=Math.round(rx+dx*scale),y=Math.round(ry+dz*scale),selected=duel&&peer.id===room.target;
       const charge=room.marks.get(peer.id),col=selected?gold:room.hostile(peer)?red:teal;
       g.strokeStyle=g.fillStyle=col;

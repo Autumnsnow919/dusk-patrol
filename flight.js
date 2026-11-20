@@ -153,6 +153,9 @@ const Flight = (() => {
     b.pitchTrim=clamp(2.9*Math.sin(alpha)/s.pitch,-.65,.65);b.controls[0]=b.pitchTrim;
     b.gear=1;b.gearDown=true;return b;
   }
+  function moveSurface(current,demand,gain,release){
+    return current+(demand-current)*(current*(demand-current)<0?release:gain);
+  }
   function step(body, command, dt, terrain) {
     const spec=fleet[body.type],axis=axes(body.quat,body.basis),vel=body.vel;
     body.contactDelay=Math.max(0,body.contactDelay-dt);
@@ -221,7 +224,12 @@ const Flight = (() => {
     const gain=1-Math.exp(-dt*6),effective=(1-.52*separated)*(.4+.6*c.tail/100),damping=(.18+Math.sqrt(authority))*(body.type==='heron'?1+body.deploy*1.6:1);
     body.pitchTrim=clamp(body.pitchTrim+(command.trim||0)*.18*dt,-.65,.65);
     const feedback=spec.unstable?-(2.9+spec.unstable)*sinAlpha*(1-body.deploy)/spec.pitch:0;
-    controls[0]+=(clamp(command.pitch+body.pitchTrim+feedback,-1,1)-controls[0])*gain;controls[1]+=(-command.yaw-controls[1])*gain;controls[2]+=(-command.roll-controls[2])*gain;
+    const pitchDemand=clamp(command.pitch+body.pitchTrim+feedback,-1,1);
+    // On a keyboard let go or reverse promptly. Held inputs still reach full travel.
+    const release=command.keyboard?1-Math.exp(-dt*15):gain;
+    controls[0]=moveSurface(controls[0],pitchDemand,gain,release);
+    controls[1]=moveSurface(controls[1],-command.yaw,gain,release);
+    controls[2]=moveSurface(controls[2],-command.roll,gain,release);
     rates[0]+=dt*(authority*(controls[0]*spec.pitch*effective+(spec.unstable||-2.9)*sinAlpha)+body.vector*body.engine*(.15+.85*c.engine/100)*(body.type==='aurora'?4.6:7)-1.9*damping*oldPitch-oldYaw*oldRoll*(inertia[2]-inertia[1])/inertia[0]);
     rates[1]+=dt*(authority*(controls[1]*(body.type==='gull'?.77+.89*body.deploy:body.type==='nocturne'?.77+.64*body.deploy:.77)*effective-1.9*slipSin)-1.75*damping*(body.type==='spire'||spec.yawDamper?1+body.deploy:1)*oldYaw-oldRoll*oldPitch*(inertia[0]-inertia[2])/inertia[1]);
     rates[2]+=dt*(authority*(controls[2]*spec.roll*(body.type==='swift'?1+.42*body.deploy:1)*effective+.5*slipSin+.008*(c.leftWing-c.rightWing)+(body.type==='petrel'||spec.rollCoupling?1.8*controls[1]*body.deploy:0))-1.65*damping*oldRoll-oldPitch*oldYaw*(inertia[1]-inertia[0])/inertia[2]);

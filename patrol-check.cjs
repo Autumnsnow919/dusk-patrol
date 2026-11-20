@@ -5,7 +5,22 @@ const Sight=require('./sight.js');
 const Bolts=require('./bolts.cjs');
 const {createServer}=require('./server.cjs');
 const idle={pitch:0,roll:0,yaw:0,throttle:0};
+for(const [weapon,side,range] of [['missile',.25,1950],['ribbon',.12,4300]]){
+  const spec=Sight.profiles[weapon],b=Flight.create('tern',[0,900,0],0);
+  const inside=(x,z)=>Sight.inRing(b,[x,900,z],spec.ring,spec.reach,spec.inner);
+  assert(inside(side*900,-900));assert(inside(0,-range));
+  assert(!inside((spec.ring+.01)*900,-900));assert(!inside(0,-spec.reach-1));assert(!inside(0,900));
+}
 const room=new Arena(0);
+{
+  const game=new Arena(0),p=game.add('p'),left=game.add('left'),right=game.add('right');
+  for(const pilot of [p,left,right])pilot.shield=0;
+  p.body=Flight.create('tern',[0,1500,0],0);p.autoFocus=true;p.weapon='missile';
+  left.body.pos=[1,1500,-900];right.body.pos=[4,1500,-900];
+  game.scan(p,Sight.profiles.missile,.1);assert.equal(p.focus,'left');
+  right.body.pos[0]=0;game.scan(p,Sight.profiles.missile,.1);assert.equal(p.focus,'left');
+  left.body.pos[0]=80;game.scan(p,Sight.profiles.missile,.1);assert.equal(p.focus,'right');
+}
 const a=room.add('a','tern','北辰'),b=room.add('b','tern','砂鸥');
 a.shield=b.shield=0;
 function place(point){
@@ -18,7 +33,7 @@ function tick(count,fire=false){
     room.tick(Flight.tick);
   }
 }
-place([900,900,-110]);tick(160,true);
+place([900,900,1500-Sight.reach-110]);tick(160,true);
 assert.equal(a.acquire,0);assert.equal(room.shots.length,0);
 place([1100,900,1000]);tick(160,true);assert.equal(a.acquire,0);
 place([900,900,1000]);tick(40,true);
@@ -109,7 +124,8 @@ function checkTracks(weapon){
 }
 checkTracks('missile');
 checkTracks('ribbon');
-for(const [weapon,offset] of [['missile',60],['ribbon',38]]){
+for(const weapon of ['missile','ribbon']){
+  const offset=800*(Sight.profiles[weapon].ring+.035);
   const game=new Arena(0),pilot=game.add('pilot','tern');
   pilot.shield=0;pilot.kit=weapon==='ribbon'?65:3;
   pilot.body=Flight.create('tern',[0,1500,0],0);
@@ -118,7 +134,7 @@ for(const [weapon,offset] of [['missile',60],['ribbon',38]]){
   }
   for(let i=0;i<240;i++){game.input(pilot,{controls:idle,weapon,target:'right',autoFocus:true});game.tick(Flight.tick);}
   assert.equal(pilot.focus,'center','center wins regardless of join order');
-  assert(!pilot.marks.has('outer'),'the old outer edge is no longer inside the lock circle');
+  assert(!pilot.marks.has('outer'),'outside the displayed capture ring');
   game.input(pilot,{controls:idle,weapon,target:'left',autoFocus:false});
   assert.equal(pilot.focus,'left','T overrides automatic focus');
 }

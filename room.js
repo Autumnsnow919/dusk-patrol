@@ -38,12 +38,13 @@ class FlightRoom {
     this.harbor=null; this.mission=null; this.kit=Outfit.standard; this.pendingKit=null;
     this.mode='tour'; this.self=null; this.target=null;this.manualTarget=null; this.weapon='gun'; this.after=0; this.events=[]; this.dodge=false;
   }
-  async join(room,type,mode='tour',name='',rule='beacon') {
+  async join(room,type,mode='tour',name='',rule='beacon',kit=Outfit.standard) {
     this.leave();
     const version=this.generation;
-    const reply=await this.request('join',{room,type,mode,name,rule});
-    if(reply.mode!==mode||reply.protocol!==13||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw new Error('旧版房主');}
+    const reply=await this.request('join',{room,type,mode,name,rule,kit,protocol:14});
+    if(reply.mode!==mode||reply.protocol!==14||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw Object.assign(new Error('旧版房主'),{reason:'version'});}
     if(version!==this.generation) { this.request('leave',{},reply.token).catch(()=>{}); return null; }
+    this.kit=kit;this.weapon=Outfit.first(kit);
     this.token=reply.token; this.id=reply.id;this.name=reply.name;this.mode=mode;this.rule=rule;this.code=reply.room??room; this.status=this.code+' · 1/8'; this.nextSync=0; return reply;
   }
   async sync(body,now,controls,fire) {
@@ -52,6 +53,7 @@ class FlightRoom {
     const duel=this.combat;
     this.busy=true; this.nextSync=now+(duel?65:90);
     try {
+      if(duel && typeof controls==='function')controls=controls();
       const launch=this.triggerTap?.target && now-this.triggerTap.at<=450?this.triggerTap:null;
       const tapped=this.triggerTap===true;
       const command=duel?{controls,compactSelf:true,weapon:this.weapon,target:launch?.target??this.target,fire:Sight.profiles[this.weapon]?!!launch:fire||tapped,fireLife:launch?.life,tap:tapped,dodge:this.dodge,after:this.after,seenTracer:this.seenTracer,known:[...this.peers.keys()]}:{pos:body.pos,quat:body.quat,vel:body.vel,condition:body.damaged?body.condition:undefined,rig:Flight.rig(body).map(v=>Math.round(v*100)/100)};

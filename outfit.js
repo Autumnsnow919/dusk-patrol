@@ -19,6 +19,9 @@ const Outfit = (() => {
   function cost(mask){return items.reduce((sum,item,i)=>sum+((mask&(1<<i))?item.cost:0),0);}
   function valid(mask){return Number.isInteger(mask)&&mask>0&&mask<(1<<items.length)&&cost(mask)<=budget;}
   function first(mask){return items.find((item,i)=>mask&(1<<i)).id;}
-  return {items,keys,keyLabel,budget,has,cost,valid,first,maskOf,standard:3};
+  function describe(mask,active){
+    return items.flatMap((item,i)=>has(mask,item.id)?[(active===item.id?'▸ ':'')+keyLabel(i)+' '+item.name]:[]).join('　');
+  }
+  return {items,keys,keyLabel,budget,has,cost,valid,first,maskOf,describe,standard:3};
 })();
 if(typeof module!=='undefined')module.exports=Outfit;

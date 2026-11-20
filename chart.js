@@ -72,6 +72,11 @@ class OutfitPanel{
   constructor(element){
     this.element=element;this.list=element.querySelector('.kit-list');
     this.summary=element.querySelector('output');this.apply=element.querySelector('.kit-apply');
+    for(const [name,mask] of [['机炮＋格斗弹',Outfit.standard],['机炮＋远程弹',Outfit.maskOf('gun','ribbon')],['浮标＋光链',Outfit.maskOf('echo','arc')]]){
+      const button=document.createElement('button');button.type='button';button.textContent=name;
+      button.onclick=()=>{this.draft=mask;this.paint();this.element.focus();};
+      element.querySelector('.kit-presets').append(button);
+    }
     this.buttons=Outfit.items.map((item,i)=>{
       const button=document.createElement('button');button.type='button';
       button.innerHTML='<kbd>'+Outfit.keyLabel(i)+'</kbd><span><b>'+item.name+'</b><small>'+item.tip+'</small></span><strong>'+item.cost+' 点</strong>';

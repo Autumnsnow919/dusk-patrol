@@ -13,10 +13,17 @@
 .brief :focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
 #airframe-card {grid-column:1/-1;color:var(--cream);}
 #airframe-card strong {color:var(--paint);font-weight:500;}
+#kit-bay{grid-column:1/-1;display:flex;align-items:center;gap:10px;}
+.brief #edit-kit{height:auto;padding:3px 8px;background:#344748;color:#b7eee0;border:1px solid #698c85;}
+#stores{color:#a7ddcc;}
+#outfit{z-index:7;}
+.kit-presets{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;}
+.kit-presets button{font-size:11px;padding:3px 5px;}
 #airframe-card small,#brief-mode{font-size:11px;}
 #brief-mode,#launch-note{grid-column:1/-1;}#brief-mode{color:#d6bcc3;}#launch-note{color:var(--gold);}#launch-note:empty{display:none;}
 #strip {position:absolute;left:14px;top:14px;max-width:65vw;padding:8px 12px;background:rgba(27,19,38,.76);font:500 12px/1.5 var(--body);pointer-events:none;}
 #strip strong,#combat-state{color:var(--gold);}
+@media(min-width:760px){#strip{box-sizing:border-box;max-width:min(34vw,430px);}}
 #perf,#trait-state{color:#a7c9bc;}
 #stage canvas#scope {width:100%;height:100%;pointer-events:none;image-rendering:pixelated;}
 body:has(#hangar:not([hidden])) :is(#hints,#btn-sound){visibility:hidden;}

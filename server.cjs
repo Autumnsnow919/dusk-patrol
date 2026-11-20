@@ -6,13 +6,14 @@ const { randomUUID } = require('node:crypto');
 const { fleet } = require('./flight.js');
 const Fields=require('./airfields.js');
 const Lake=require('./lake.js');
+const Outfit=require('./outfit.js');
 const { Arena,spawnHeading } = require('./arena.cjs');
 
 function createServer() {
   require('./contacts.cjs').prepare('scenery');
   const sessions = new Map();
   const rooms = new Map();
-  const files = new Set(['index.html', 'airfields.js','airframes.js','flight.js','cockpit.js', 'room.js', 'hangar.css','scope.js','lake.js','outfit.js','terrain.js','chart.js','sight.js','land-surface.js','world-cache.js','peer-pose.js','sound.js','PixelifySans.ttf','IBMPlexMono.ttf']);
+  const files = new Set(['index.html', 'airfields.js','airframes.js','flight.js','cockpit.js','pilot-stick.js', 'room.js', 'hangar.css','scope.js','lake.js','outfit.js','terrain.js','chart.js','sight.js','land-surface.js','world-cache.js','peer-pose.js','sound.js','PixelifySans.ttf','IBMPlexMono.ttf']);
   const expiry = 12000;
   let nextPrune=0;
   const remove=(token,pilot)=>{
@@ -46,6 +47,8 @@ function createServer() {
       if (!data || typeof data!=='object') return reply(400,{});
       prune();
       if (pathname === '/join') {
+        if(data.protocol!==undefined && data.protocol!==14)return reply(409,{reason:'version'});
+        if(data.kit!==undefined && !Outfit.valid(data.kit))return reply(400,{reason:'kit'});
         const mode=data.mode??'tour';
         let room=data.room;
         if((mode==='pvp'||mode==='pve') && room===''){
@@ -67,9 +70,9 @@ function createServer() {
         let name=base;
         for(let n=2;occupied.has(name.toLowerCase());n++)name=base+'·'+n;
         const pilot={name,room,type:data.type,id,seen:Date.now(),pose:null,group};
-        group.arena?.advance(performance.now()); const fighter=group.arena?.add(id,data.type,name);
+        group.arena?.advance(performance.now()); const fighter=group.arena?.add(id,data.type,name,null,data.kit);
         rooms.set(room,group); group.members.add(pilot); sessions.set(token,pilot);
-        return reply(200,{token,id,name,room,mode,rule,type:data.type,protocol:13,slot:fighter?.slot??others.length,lead:others.find(peer=>peer.pose)?.pose,
+        return reply(200,{token,id,name,room,mode,rule,type:data.type,protocol:14,slot:fighter?.slot??others.length,lead:others.find(peer=>peer.pose)?.pose,
           spawn:fighter?.body.pos,heading:fighter?spawnHeading(fighter.slot,mode==='pve'):undefined});
       }
       const token = req.headers.authorization?.replace(/^Bearer /,''), pilot = sessions.get(token);

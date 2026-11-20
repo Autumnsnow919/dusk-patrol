@@ -83,6 +83,11 @@ async function network(){
   try{
     const join=(room,mode)=>post('join',{room,mode,type:'kite'});
     const p=await join('DUEL','pvp');
+    assert.equal((await post('join',{room:'DUEL',mode:'pvp',type:'j16',kit:15})).status,400);
+    const custom=await post('join',{room:'CUSTOM',mode:'pve',type:'j16',kit:65,protocol:14});
+    const load=await post('sync',command('ribbon',{controls:{pitch:.35,roll:-.2,yaw:0,throttle:.1,keyboard:true}}),custom.token);
+    assert.equal(load.self.kit,65);assert.equal(load.self.weapon,'ribbon');assert.equal(load.self.refit,0);
+    assert.equal((await post('sync',command('gun',{controls:{pitch:1.1,roll:0,yaw:0,throttle:0}}),custom.token)).status,400);
     assert.equal((await post('sync',command('gun',{kit:15}),p.token)).status,400);
     const valid=await post('sync',command('laser',{kit:5}),p.token);
     assert.equal(valid.self.kit,5);assert.equal(valid.self.refit,0);

@@ -1,9 +1,9 @@
 // Rules shared by the arcade reticle and the match referee.
 const Sight=(()=>{
-  const ring=.066, reach=1500, fill=1.05;
+  const ring=.30, reach=2000, fill=1.05;
   const profiles={
     missile:{ring,reach,fill,inner:0,wait:4.8,damage:100},
-    ribbon:{ring:.039,reach:3600,fill:1.85,inner:550,wait:8,damage:100}
+    ribbon:{ring:.15,reach:4400,fill:1.85,inner:550,wait:8,damage:100}
   };
   function inRing(body,point,slope=ring,limit=reach,inner=0){
     const f=body.basis.f,dx=point[0]-body.pos[0],dy=point[1]-body.pos[1],dz=point[2]-body.pos[2];
