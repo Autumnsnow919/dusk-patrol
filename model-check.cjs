@@ -114,11 +114,25 @@ for(const type of Object.keys(Flight.fleet)){
   assert(mesh.data.every(Number.isFinite));
   assert.equal(parts.length*30,mesh.data.length);
   for(let i=1;i<=8;i++)assert.equal(parts.includes(i),!(type==='nocturne'&&i===4),type+' damage zone '+i);
-  if(['su27','j10','j20','j16','f4','f16','f22'].includes(type)){
-    assert.equal(cells.filter(c=>c.component==='nozzle' && c.mat===11).length,['j10','f16'].includes(type)?1:2);
+  if(['su27','j10','j20','j16','f4','f16','f22','f15','f5','m2000'].includes(type)){
+    assert.equal(cells.filter(c=>c.component==='nozzle' && c.mat===11).length,Flight.fleet[type].singleEngine?3:6);
     assert.equal(cells.some(c=>c.component==='foreplane'),['j10','j20'].includes(type));
     assert.equal(cells.some(c=>c.component==='tail fairing'),['su27','j16'].includes(type));
-    assert.equal(cells.some(c=>c.component==='canopy' && c.mat===0),['j16','f4'].includes(type));
+    assert.equal(cells.some(c=>c.component==='canopy' && c.mat===0),['j16','f4','f15','m2000','f5'].includes(type));
+  }
+  const jet= !Flight.fleet[type].shaft;
+  if(jet){
+    const spec=Flight.fleet[type],b=Flight.create(type);
+    const rim=cells.find(c=>c.component==='nozzle' && c.mat===11);
+    const widthHeight=engine=>{
+      b.engine=engine;
+      const points=rim[1].map(v=>posed(v.map(x=>x*1.3),11,b));
+      return [0,1].map(i=>Math.max(...points.map(p=>p[i]))-Math.min(...points.map(p=>p[i])));
+    };
+    const idle=widthHeight(0),dry=widthHeight(.72),full=widthHeight(1);
+    assert(dry[1]<idle[1]*.65,type+' exhaust closes');
+    if(spec.highPower)assert(full[1]>dry[1]*1.8,type+' exhaust opens again');
+    assert(spec.flatOutlet?Math.abs(idle[0]-dry[0])<1e-6:dry[0]<idle[0]*.65,type+' nozzle shape');
   }
   const cloud=all.filter(c=>c.mat===14);
   if(type==='rv8a'||type==='sail')assert.equal(cloud.length,0);
@@ -131,7 +145,7 @@ for(const type of Object.keys(Flight.fleet)){
   }
   for(const [controls,gear,deploy] of poses){
     const body=Flight.create(type);
-    Object.assign(body,{controls,gear:type==='rv8a'?1:gear,deploy,propPhase:deploy*1.92,wheelPhase:deploy*1.35});
+    Object.assign(body,{controls,engine:gear===1?deploy:.72,gear:type==='rv8a'?1:gear,deploy,propPhase:deploy*1.92,wheelPhase:deploy*1.35});
     if(Flight.fleet[type].vector){
       body.vector=controls[0]*.57;body.vecYaw=Flight.fleet[type].vector===3?controls[1]*.57:0;
       body.vecRoll=Flight.fleet[type].vector===3?controls[2]*.43:0;

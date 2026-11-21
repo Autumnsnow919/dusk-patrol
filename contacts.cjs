@@ -108,8 +108,13 @@ function posed(vertex,mat,b){
     rotate(1,2,-.18,nose?3.25:-1,(1-e)*1.68);
   }else if(mat===10)rotate(0,1,0,0,b.propPhase||0);
   else if(mat===11){
+    const spec=Flight.fleet[b.type],center=Math.sign(p[0])*spec.engineSpacing;
+    const travel=Math.min(1,Math.max(0,(-8.4-p[2])/1.1));
+    const scale=1+travel*(Flight.nozzleOpening(spec,b.engine,b.deploy)-1);
+    if(!spec.flatOutlet)p[0]=center+(p[0]-center)*scale;
+    p[1]=-.12+(p[1]+.12)*scale;
     rotate(1,2,-.12,-8.4,.50*(b.vector+Math.sign(p[0])*b.vecRoll));
-    if(b.vecYaw)rotate(0,2,Math.sign(p[0])*1.32,-8.4,.42*b.vecYaw);
+    if(b.vecYaw)rotate(0,2,center,-8.4,.42*b.vecYaw);
   }else if(mat===17)rotate(0,2,Math.sign(p[0])*3.35,4.25,b.propPhase||0);
   else if(mat===19){
     const spec=Flight.fleet[b.type],c=spec.canard;

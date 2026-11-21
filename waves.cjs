@@ -4,7 +4,9 @@ const Outfit = require('./outfit.js');
 const Sight = require('./sight.js');
 const {randomInt} = require('node:crypto');
 
-const rosters=[['tern','gull'],['swift','wisp','petrel'],['opal','j10','ibis','j16']];
+const rosters=[[['tern'],['gull']],[['swift'],['wisp','m2000'],['petrel','f5']],
+  [['opal','f15'],['j10'],['ibis'],['j16']]];
+const carriesMissile=mask=>Object.keys(Sight.profiles).some(id=>Outfit.has(mask,id));
 const names = ['青羽', '浮灯', '雨燕', '云雀'];
 const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
 const flatDistance=(a,b)=>Math.hypot(a[0]-b[0],a[2]-b[2]);
@@ -31,7 +33,7 @@ function assignPartner(drone,humans,assignments){
     if(cost<best){partner=human;best=cost;}
   }
   const id=partner?.id??null,life=partner?.life??0;
-  if(drone.partner!==id || drone.partnerLife!==life)drone.gate=null;
+  if((drone.partner!==id || drone.partnerLife!==life) && drone.gate?.route!=='entry')drone.gate=null;
   drone.partner=id;drone.partnerLife=life;
   if(partner)assignments.set(id,assignments.get(id)+1);
   return partner;
@@ -56,6 +58,18 @@ function chooseAction(arena,drone,opponent,effects){
   if(!opponent || drone.route==='recover' || drone.route==='escape' || now<drone.nextAction)return input;
   const point=opponent.body.pos;
   const distance=Math.hypot(point[0]-body.pos[0],point[1]-body.pos[1],point[2]-body.pos[2]);
+  // A live mark belongs to a specific avatar life. Finish that input before
+  // cycling through secondary items. The room still validates each launch.
+  const active=Sight.profiles[drone.weapon];
+  if(active && drone[drone.weapon+'At']<=now){
+    const focus=drone.marks.has(opponent.id)?opponent:arena.players.get(drone.focus);
+    const mark=focus && drone.marks.get(focus.id);
+    if(mark && arena.opponents(drone,focus) && focus.hp && focus.shield<=now && mark.life===focus.life &&
+       Sight.inRing(body,focus.body.pos,active.ring,active.reach,active.inner)){
+      input.target=focus.id;input.fireLife=focus.life;input.fire=mark.time>=active.fill;
+      return input;
+    }
+  }
   for(let i=0;i<drone.pack.length;i++){
     const index=(drone.slotCursor+i)%drone.pack.length,id=drone.pack[index];
     if(id==='prism')continue;
@@ -100,8 +114,13 @@ class PatrolWaves {
     const remaining=kits.slice();
     for (let i = 0; i <= this.wave; i++) {
       const angle = i * 2 * Math.PI / (this.wave + 1);
-      const [kit]=remaining.splice(this.drawIndex(remaining.length),1);
-      const type=rosters[this.wave-1][i];
+      // One seat enters through the marked lane with a randomly drawn missile kit.
+      // The other seats still draw from the entire legal outfit pool.
+      const entry=i===this.wave,pool=entry?remaining.filter(carriesMissile):remaining;
+      const kit=pool[this.drawIndex(pool.length)];
+      remaining.splice(remaining.indexOf(kit),1);
+      const variants=rosters[this.wave-1][i];
+      const type=variants.length===1?variants[0]:variants[this.drawIndex(variants.length)];
       const drone=arena.add('ai-'+ ++this.serial,type,'AI · '+names[i],8+i,kit);
       drone.cruiseHeight = 1020 + 45 * i;
       drone.radius = 580 + i * 100;
@@ -110,8 +129,15 @@ class PatrolWaves {
       drone.pack=Outfit.items.filter(item=>Outfit.has(kit,item.id)).map(item=>item.id);
       drone.slotCursor=this.drawIndex(drone.pack.length);
       drone.lastHealth=100;drone.prismDue=null;drone.alertAt=null;drone.burstEnd=0;drone.gunRest=0;drone.nextAction=0;
-      drone.body = Flight.create(drone.type, [900 + drone.radius * Math.sin(angle),
-        drone.cruiseHeight, 1500 - drone.radius * Math.cos(angle)], angle + (i%2?-1:1)*Math.PI/2);
+      const atField=entry && [...arena.players.values()].some(p=>!p.bot && flatDistance(p.body.pos,[900,1050,560])<1500);
+      if(atField){
+        drone.body=Flight.create(type,[930,1050,-570],Math.PI);
+        setGate(drone,arena.time,'entry',0,1,1800,5);
+      }else{
+        drone.body=Flight.create(type,[900+drone.radius*Math.sin(angle),drone.cruiseHeight,1500-drone.radius*Math.cos(angle)],
+          angle+(i%2?-1:1)*Math.PI/2);
+      }
+      if(entry)drone.slotCursor=drone.pack.findIndex(id=>Sight.profiles[id]);
       drone.weapon=drone.pack[drone.slotCursor];
       drone.controls = {pitch:0, roll:0, yaw:0, throttle:0};
       this.drones.push(drone);
@@ -157,7 +183,7 @@ class PatrolWaves {
       let dx,dz;
       const {f,r,u}=body.basis;
       let route='patrol';
-      if(drone.gate && (arena.time>=drone.gate.until || Math.hypot(drone.gate.x-x,drone.gate.z-z)<50))drone.gate=null;
+      if(drone.gate && ((drone.gate.route==='entry' && goal && distance>3000) || arena.time>=drone.gate.until || Math.hypot(drone.gate.x-x,drone.gate.z-z)<50))drone.gate=null;
       const ring=circles.find(c=>(!c.id || (c.id===drone.id && c.life===drone.life)) &&
         Math.hypot(x-c.pos[0],y-c.pos[1],z-c.pos[2])<c.radius+35);
       if(ring && drone.gate?.route!=='escape')setGate(drone,arena.time,'escape',x-ring.pos[0],z-ring.pos[2],360,2.6);
@@ -180,7 +206,7 @@ class PatrolWaves {
       }
       if(drone.gate){
         route=drone.gate.route;dx=drone.gate.x-x;dz=drone.gate.z-z;
-        altitude=Math.max(y,altitude)+(shortLane?16:32);
+        altitude=route==='entry'?1050:Math.max(y,altitude)+(shortLane?16:32);
       }
       for(const mate of this.drones){
         if(mate===drone||!mate.hp||Math.abs(y-mate.body.pos[1])>110)continue;

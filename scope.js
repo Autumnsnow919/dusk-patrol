@@ -159,7 +159,7 @@ class DuelScope {
       path([tail,point]);path([[x,y-4],[x+4,y],[x,y+4],[x-4,y]],true);g.lineWidth=1;
     }
     if(self.incoming||self.warned){
-      let txt=self.incoming?room.flareReadout(true):'锁定预警';
+      let txt=self.incoming?room.flareReadout(true):room.lockReadout();
       if(!self.incoming && self.laserThreat){
         const painter=room.peers.get(self.laserThreat);
         if(painter)txt=bearingName(bearing(painter.displayPos))+'方激光照射 · 脱离光圈';

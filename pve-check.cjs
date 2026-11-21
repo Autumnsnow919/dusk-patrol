@@ -27,7 +27,7 @@ function exerciseDraw(){
     const room=new Arena(0,'waves',length=>i%length);
     const one=room.add('one','tern');room.tick(Flight.tick);
     const [a,b]=room.mission.drones;
-    seen.add(a.kit);assert.notEqual(a.kit,b.kit);
+    seen.add(a.kit);assert.notEqual(a.kit,b.kit);assert(b.pack.some(id=>Sight.profiles[id]));
     const kit=a.kit,late=room.add('late','tern');one.target=late.target=a.id;
     room.tick(Flight.tick);
     for(const pilot of [one,late])assert.equal(room.snapshot(pilot,0).mission.contact.kit,kit);
@@ -37,6 +37,55 @@ function exerciseDraw(){
   console.log(masks.length+' distinct legal NPC loadouts reachable at first spawn');
 }
 exerciseDraw();
+
+// Start at the actual hangar spawn and let both sides fly. An isolated shot
+// with two pre-aligned bodies cannot catch missing loadouts or a broken entry.
+function exerciseEntryLocks(){
+  const launched=new Set();
+  for(const type of ['tern','j20','f16'])for(let n=0;n<24;n++){
+    const game=repeatableArena(n*711+18),pilot=game.add('visitor',type);
+    const seen=new Map();let fired=false;
+    for(let i=0;i<10/Flight.tick && !fired;i++){
+      game.tick(Flight.tick);
+      if(i%8)continue;
+      const packet=game.snapshot(pilot,0),lock=packet.mission.lock;
+      if(lock){
+        assert(packet.self.warned);
+        if(lock.percent>0 && lock.percent<100)seen.set(lock.id,lock.weapon);
+      }
+      for(const e of packet.events)if(e.to===pilot.id && Sight.profiles[e.kind]){
+        assert.equal(seen.get(e.from),e.kind,'launch must follow a visible warning from the same AI');
+        assert(packet.self.incoming);launched.add(e.kind);fired=true;break;
+      }
+    }
+    assert(fired,'no launch on stock entry: '+type+' seed '+n);
+  }
+  assert.deepEqual(launched,new Set(Object.keys(Sight.profiles)));
+  console.log('72 stock PvE entries: both missile types warned, acquired and launched');
+}
+exerciseEntryLocks();
+
+// The co-op route can follow one pilot while the shared reticle highlights another.
+{
+  const game=repeatableArena(),near=game.add('near','tern'),visible=game.add('visible','tern');
+  game.tick(Flight.tick);
+  const [drone,mate]=game.mission.drones;mate.hp=0;
+  equip(drone,'ribbon','prism');
+  drone.body=Flight.create('tern',[900,1050,1500],0);
+  near.body=Flight.create('tern',[1190,1050,1500],0);
+  visible.body=Flight.create('tern',[900,1050,200],0);
+  near.shield=visible.shield=drone.shield=0;
+  drone.gate={route:'entry',x:900,z:-1200,until:game.time+5};
+  let warned=false;
+  for(let i=0;i<3/Flight.tick;i++){
+    game.tick(Flight.tick);
+    if(i%12===0)warned ||= !!game.snapshot(visible,0).mission.lock;
+    if(game.events.some(e=>e.kind==='ribbon' && e.from===drone.id && e.to===visible.id))break;
+  }
+  assert.equal(drone.partner,near.id);
+  assert(warned && game.events.some(e=>e.kind==='ribbon' && e.from===drone.id && e.to===visible.id));
+  assert(!game.events.some(e=>e.kind==='ribbon' && e.to===near.id));
+}
 
 function exerciseDecisions(){
   const game=repeatableArena(),one=game.add('one','tern'),two=game.add('two','swift');

@@ -440,6 +440,7 @@ uniform vec4 uWear,uGearWear;
 uniform float uDeploy;uniform float uElevon;
 uniform vec4 uCanards;
 uniform float uWheel;uniform vec2 uVectorAxes;
+uniform vec4 uOutlet;   // delta in width / height, engine centre offset, spool
 uniform vec3 uPivots[14],uJointAxes[14];
 vec3 turn(vec3 v, vec3 axis, float c, float s){
   return v*c+cross(axis,v)*s+axis*dot(axis,v)*(1.-c);
@@ -477,15 +478,26 @@ void main(){
     }else if(part==10.){
       p.xy=rot(uPower.z)*p.xy;n.xy=rot(uPower.z)*n.xy;
     }else if(part==11. || part==12. || part==13.){
+      float outletX=sign(aPos.x)*uOutlet.z;
+      vec2 pivot=vec2(outletX,-.12);
+      float travel=clamp((-8.4-aPos.z)/1.1,0.,1.);
+      vec2 scale=vec2(1.)+travel*uOutlet.xy;
+      vec2 radial=p.xy-pivot;
+      p.xy=pivot+radial*scale;
+      n.xy/=scale;
+      if(travel>0. && travel<1.)n.z+=dot(radial*uOutlet.xy,n.xy)/1.1;
       if(part==12.){
+        if(uPower.y<.012){gl_Position=vec4(2.,2.,2.,1.);return;}
         vMat=2.;vLocal=vec3(0.,0.,(p.z+9.53)/8.);
         p.z=-9.53+(p.z+9.53)*uPower.y;
-      }else if(part==13.)vMat=4.;
+      }else if(part==13.){
+        vMat=4.;vCol=mix(vec3(.22,.12,.09),aCol.rgb,uOutlet.w);
+      }
       float tilt=.50*(uPower.x+sign(aPos.x)*uVectorAxes.y);
       p.yz=rot(tilt)*(p.yz-vec2(-.12,-8.4))+vec2(-.12,-8.4);
       n.yz=rot(tilt)*n.yz;
       float swivel=.42*uVectorAxes.x;
-      p.xz=rot(swivel)*(p.xz-vec2(sign(p.x)*1.32,-8.4))+vec2(sign(p.x)*1.32,-8.4);
+      p.xz=rot(swivel)*(p.xz-vec2(outletX,-8.4))+vec2(outletX,-8.4);
       n.xz=rot(swivel)*n.xz;
     }else if(part==17.){
       float hub=sign(p.x)*3.35;
@@ -1476,8 +1488,9 @@ const PLANE = {
       gl.uniform4f(pr.u('uWear'),c.fuselage/100,c.leftWing/100,c.rightWing/100,c.tail/100);
       gl.uniform4f(pr.u('uGearWear'),c.leftGear/100,c.rightGear/100,c.noseGear/100,c.engine/100);
       const spec=Flight.fleet[type];
-      const burner=type==='needle'||type==='pulse'?rig[6]:0;
-      const exhaust=.06+.87*rig[5]**2+burner*.90;
+      const burner=spec.auxBurner?rig[6]:0,opening=Flight.nozzleOpening(spec,rig[5],rig[6])-1;
+      const exhaust=(spec.highPower ? .94*sstep(.72,1,rig[5]):.06*rig[5]**2)+burner*.90;
+      gl.uniform4f(pr.u('uOutlet'),spec.flatOutlet?0:opening,opening,spec.engineSpacing,rig[5]);
       const mist=Math.max(0,1-Math.abs(mach-1)/.087)*clamp((1700-pos[1])/800,0,1);
       gl.uniform4f(pr.u('uControls'),rig[0],rig[1],rig[2],rig[3]);
       gl.uniform4f(pr.u('uPower'),rig[4],exhaust*(1+.055*Math.sin(S.time*53)),phase,mist);
@@ -1786,7 +1799,7 @@ const PLANE = {
     }
   }
   let nextReadout=0;
-  const patrolActions={patrol:'巡航',regroup:'追赶目标',approach:'接近目标',pass:'交会拉开',space:'拉开间距',escape:'避开光圈',recover:'恢复高度'};
+  const patrolActions={entry:'入场通飞',patrol:'巡航',regroup:'追赶目标',approach:'接近目标',pass:'交会拉开',space:'拉开间距',escape:'避开光圈',recover:'恢复高度'};
   function showReadout(now) {
     if(now<nextReadout) return; nextReadout=now+150;
     $('strip').classList.toggle('seated',cam.wCockpit>.985);
@@ -1852,7 +1865,7 @@ const PLANE = {
       const arcHint=!tracked?'待选目标':self.lock>0?'连线 '+Math.round(100*self.lock)+'%':distance>Sight.arc.reach?'射程外':'对入机头圈 · J 连线';
       const missileReadout=!tracked?'等待目标':distance>(missile?.reach||0)?'超出捕获距离':distance<missile?.inner?'近距盲区':
         charge===100?(self.cool?'已锁定':'已锁定 · J 发射'):charge?'捕获 '+charge+'%':'将目标移入圈内';
-      const warning=now<noticeUntil&&notice==='机炮拦截成功'?notice:self.revive?'击毁 · '+self.revive.toFixed(1)+' s 后重生':self.shield?'出生保护':self.incoming?room.flareReadout(true):self.warned?'锁定预警':self.prism?'镜阵展开':self.diverted?'诱偏成功':(!body.grounded && !runway && S.agl<45)||Math.hypot(S.pos[0]-900,S.pos[2]-1500)>Lake.arenaRadius-1200 || S.pos[1]>Lake.arenaCeiling-350?'接近赛场边界':'';
+      const warning=now<noticeUntil&&notice==='机炮拦截成功'?notice:self.revive?'击毁 · '+self.revive.toFixed(1)+' s 后重生':self.shield?'出生保护':self.incoming?room.flareReadout(true):self.warned?room.lockReadout():self.prism?'镜阵展开':self.diverted?'诱偏成功':(!body.grounded && !runway && S.agl<45)||Math.hypot(S.pos[0]-900,S.pos[2]-1500)>Lake.arenaRadius-1200 || S.pos[1]>Lake.arenaCeiling-350?'接近赛场边界':'';
       const changing=self.weapon!==room.weapon;
       const status=room.pendingKit!==null?'提交配装中':self.refit?'换装 '+self.refit.toFixed(1)+'s':changing?'切换中':
         self.cool && !(room.weapon==='arc' && self.lock>0)?'冷却 '+self.cool.toFixed(1)+'s':self.hot&&room.weapon==='gun'||missile||self.revive||self.shield?'':'就绪';
@@ -1872,7 +1885,7 @@ const PLANE = {
     $('trait-state').textContent=(watched?'观测 '+watched.name+'　':'')+(S.view===3&&orbit.anchor?'定点观测':VIEWS[S.view])+'　/　'+(active?'V ':'')+spec.trait+
       (active?(spec.unstable?(rig[6]>.5?' · 增稳放宽':' · 自动增稳'):(rig[6]>.06?' · 已展开':' · 待命')):'')+(!watched&&type==='pulse'?'　电量 '+Math.round(body.charge*100)+'%':'')+
       (spec.canard?'　前翼 左 '+Math.round(-Flight.canardAngle(spec,rig[0],rig[2],rig[6],-1)*180/Math.PI)+'° / 右 '+Math.round(-Flight.canardAngle(spec,rig[0],rig[2],rig[6],1)*180/Math.PI)+'°':'')+
-      nozzle+(!watched&&(spec.vector||spec.unstable)?'　迎角 '+Math.round(body.alpha*180/Math.PI)+'°':'');
+      nozzle+(spec.shaft?'':'　喷口开度 '+Math.round(100*Flight.nozzleOpening(spec,rig[5],rig[6])/(spec.highPower?1.27:1.04))+'%')+(!watched&&(spec.vector||spec.unstable)?'　迎角 '+Math.round(body.alpha*180/Math.PI)+'°':'');
   }
 
   const audio=new FlightAudio(Sight.gunRate);

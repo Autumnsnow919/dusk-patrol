@@ -6,6 +6,7 @@ const selfFields=[
   'cool','flares','puffs','dodge','diverted','acquire','warned','incoming'
 ];
 const PeerPose={
+  protocol:16,
   // Each reply stands alone. Packet loss and respawn need no baseline or repair delta.
   packSelf(p){return [...selfFields.map(key=>p[key]),p.damaged?p.condition:null,p.star??null,p.flareRefill,p.arcThreat,p.laserThreat];},
   unpackSelf(row,freshCondition){

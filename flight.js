@@ -44,6 +44,9 @@ const Flight = (() => {
   fleet.f4={...fleet.comet,name:'F-4C 鬼怪 II',role:'折翼双座',noseLength:11.8,roll:2.95,yawDamper:true};
   fleet.f16={...fleet.petrel,name:'F-16A 战隼',role:'单发轻型',singleEngine:true,noseLength:10.8,roll:5.15,landingFlaps:true};
   fleet.f22={...fleet.lance,name:'F-22A 猛禽',role:'双尾二维矢量',noseLength:12.4,roll:3.75};
+  fleet.f15={...fleet.comet,name:'F-15C 鹰',role:'双垂尾重型',noseLength:13.8,roll:3.45,pitch:1.75,wingLevel:true};
+  fleet.m2000={...fleet.delta,name:'幻影 2000C',role:'无平尾三角翼',singleEngine:true,noseLength:12.6,elevon:true,yawDamper:true};
+  fleet.f5={...fleet.petrel,name:'F-5E 虎 II',role:'轻型双发',noseLength:13.2,engineSpacing:.85,roll:5.25,rollCoupling:true};
   // Hinge height and station in mesh units, followed by differential and lift-mode travel.
   for(const [type,y,z,mix,lift] of [
     ['kite',.24,4.62,.13,0],['pulse',.24,4.62,0,0],['petrel',.24,4.62,.19,0],['aurora',.24,4.62,.12,0],
@@ -57,9 +60,12 @@ const Flight = (() => {
   const highPower={quill:81000,ogee:114000,cirrus:108000,ibis:73000,nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
     needle:16000,delta:90000,petrel:65000,aurora:99000,spire:80000,skate:74000,wisp:70000,opal:70000,lance:81000};
   for(const [type,boost] of Object.entries(highPower))fleet[type].highPower=boost;
-  for(const [type,preset] of [['su27','comet'],['j10','wisp'],['j20','cirrus'],['j16','comet'],['f4','comet'],['f16','petrel'],['f22','lance']])
+  for(const [type,preset] of [['su27','comet'],['j10','wisp'],['j20','cirrus'],['j16','comet'],['f4','comet'],['f16','petrel'],['f22','lance'],['f15','comet'],['m2000','delta'],['f5','petrel']])
     fleet[type].highPower=fleet[preset].highPower;
   const cards={
+    f15:['翼平辅助','座舱后方是两条方进气道，两片高垂尾分立于宽机背两侧。松开滚转后按 V，方便改平跟队。',[8.05,.18,-3.05],[.46,.58,.66]],
+    m2000:['稳向通场','浅蓝色三角翼一直延伸到机尾，两侧进气道汇入一只圆喷口。V 稳住航向，W/S 驱动升降副翼。',[7.1,.17,-5.35],[.50,.67,.76]],
+    f5:['联动滚转','长机鼻、小梯形翼，两只喷口紧挨在单垂尾下。按住 V 配合 Q/E，能带出灵活的联动滚转。',[5.05,.15,-2.55],[.69,.59,.40]],
     f4:['航向阻尼','串列双座，外翼向上折，平尾向下斜。滚转手感偏沉，按住 V 稳住航向。',[7.5,.97,-3.65],[.42,.49,.34]],
     f16:['增升襟翼','单座泡形舱盖，翼根向前伸，机腹下只有一个进气口。滚转轻快，按 V 放襟翼进近。',[6.2,.12,-2.85],[.58,.66,.73]],
     f22:['二维矢量','宽菱形主翼、外倾双尾和扁喷口。按住 V 配合 W/S，能看到喷口和尾焰一起俯仰。',[7.5,.20,-2.85],[.43,.5,.54]],
@@ -99,7 +105,10 @@ const Flight = (() => {
   };
   for(const [type,[trait,description,tip,color]] of Object.entries(cards))Object.assign(fleet[type],{trait,description,tip,color,pvp:type!=='rv8a'});
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-  for(const spec of Object.values(fleet)){
+  for(const [type,spec] of Object.entries(fleet)){
+    spec.engineSpacing=spec.singleEngine?0:(spec.engineSpacing??1.32);
+    spec.flatOutlet=type==='f22';
+    spec.auxBurner=type==='pulse'||type==='needle';
     const length=(spec.noseLength??10.4)+9.5;
     spec.boomLevel=clamp(.38+1.45*spec.tip[0]/length,.60,1.18);
     spec.boomRate=clamp(22/length,.76,1.15);
@@ -260,7 +269,14 @@ const Flight = (() => {
     if(body.grounded){body.stalled=false;if(speed<2){body.alpha=0;body.slip=0;}}
     body.load=body.grounded?1:(accelX*axis.u[0]+accelY*axis.u[1]+accelZ*axis.u[2])/9.81;
   }
+  // Visual travel follows the spooled engine. The lip narrows in dry power
+  // and opens again as the game's high-power stage comes in.
+  function nozzleOpening(spec,engine,deploy=0){
+    const dry=clamp(engine/.72,0,1),wet=clamp((engine-.72)/.28,0,1);
+    const boost=Math.max(spec.highPower?wet:0,spec.auxBurner?deploy:0);
+    return 1.04-.45*dry*(2-dry)+.68*boost*boost*(3-2*boost);
+  }
   function rig(b){return [...b.controls,b.gear,b.vector,b.engine,b.deploy,b.vecYaw,b.vecRoll];}
-  return { fleet, canardAngle, rig, create, approach, axes, step, density,soundSpeed,thermal,boomMargin,tick: 1/120 };
+  return { fleet, canardAngle, nozzleOpening, rig, create, approach, axes, step, density,soundSpeed,thermal,boomMargin,tick: 1/120 };
 })();
 if (typeof module !== 'undefined') module.exports = Flight;

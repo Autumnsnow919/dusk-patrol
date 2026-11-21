@@ -12,7 +12,8 @@ const CockpitLayouts = (() => {
     tandem:['pod','bow'],      cirrus:['wide','bubble'],      ibis:['pod','facet'],
     quill:['offset','bubble'], ogee:['twin','bow'],           su27:['six','facet'],
     j10:['portrait','hoop'],   j20:['wide','brace'],          j16:['twin','bubble'],
-    f4:['six','split'],        f16:['offset','clear'],        f22:['wide','hoop']
+    f4:['six','split'],        f16:['offset','clear'],        f22:['wide','hoop'],
+    f15:['twin','clear'],      m2000:['portrait','split'],    f5:['sport','split']
   };
   // Station coordinates are fractions of the available instrument bank.
   const banks = {
@@ -231,7 +232,7 @@ const Cockpit = (function (fleet,sight) {
         px(x, y, c);
       }
     }
-    const stencil=({f4:'F-4C',f16:'F-16A',f22:'F-22A',su27:'SU-27',j10:'J-10',j16:'J-16',j20:'J-20',rv8a:'RV-8A'})[type]||type.toUpperCase();
+    const stencil=({f15:'F-15C',m2000:'2000C',f5:'F-5E',f4:'F-4C',f16:'F-16A',f22:'F-22A',su27:'SU-27',j10:'J-10',j16:'J-16',j20:'J-20',rv8a:'RV-8A'})[type]||type.toUpperCase();
     const tagW=textW(stencil)+9,tagY=y0+6;
     rect(cx-(tagW>>1),tagY-1,tagW,8,K.plateLo);text(stencil,cx-(textW(stencil)>>1),tagY,K.tick);
     if(bank!=='six'){buildBank();return;}

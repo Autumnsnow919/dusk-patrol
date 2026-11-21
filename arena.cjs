@@ -482,13 +482,20 @@ class Arena {
     const births=[];
     for(let i=lo;i<this.tracers.length;i++)births.push(this.tracers[i].spawn);
     const peers=[];
-    let arcThreat=null,laserThreat=null,warned=false;
+    let arcThreat=null,laserThreat=null,warned=false,patrolLock=null;
     for(const other of this.players.values()){
       if(other===player)continue;
       if(other.hp){
         if(other.arcCast?.id===player.id && other.arcCast.life===player.life)arcThreat=other.id;
         if(other.target===player.id && other.laser>0)laserThreat=other.id;
-        if(other.marks.get(player.id)?.life===player.life)warned=true;
+        const mark=other.marks.get(player.id);
+        if(mark?.life===player.life){
+          warned=true;
+          if(other.bot && Sight.profiles[other.weapon]){
+            const percent=Sight.percent(mark.time,Sight.profiles[other.weapon].fill);
+            if(!patrolLock||percent>patrolLock.percent)patrolLock={id:other.id,weapon:other.weapon,percent};
+          }
+        }
       }
       const peer=summary(other);
       if(!known){peers.push(peer);continue;}
@@ -510,7 +517,10 @@ class Arena {
       shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type,+(!s.diverted && s.to===player.id && s.life===player.life)]),
       events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
     if(Sight.profiles[player.weapon])result.tracking={focus:player.focus,marks:[...player.marks].map(([id,mark])=>[id,Sight.percent(mark.time,Sight.profiles[player.weapon].fill)])};
-    if(this.mission)result.mission=this.mission.snapshot(this.time,this.players.get(player.target));
+    if(this.mission){
+      result.mission=this.mission.snapshot(this.time,this.players.get(player.target));
+      if(patrolLock)result.mission.lock=patrolLock;
+    }
     if(compactSelf)result.self=PeerPose.packSelf(result.self);
     return result;
   }

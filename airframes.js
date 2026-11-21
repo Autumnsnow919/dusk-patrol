@@ -129,6 +129,9 @@ function buildPlane(type = 'comet', cells = null, triangleParts = null) {
       tip[1]=1.9;
       return [[.52,11.4,-1.3,.40,.24],[2.2,9.1,-1.75,.33,.26],[4.25,5.8,-3,.22,.27],tip];
     }
+    if(type==='f15')return [[.48,10.4,-.28,.43,.30],[2.35,7.2,-1.07,.32,.29],[span,2.25,sweep,.13,rise]];
+    if(type==='m2000')return [[.42,13.0,-1.36,.39,.06],[3.25,8.3,-2.88,.26,.12],[span,1.12,sweep,.09,rise]];
+    if(type==='f5')return [[.45,8.7,.05,.28,.12],[1.65,4.75,-1.16,.20,.13],[span,1.55,sweep,.095,rise]];
     if(type==='f4')return [[.48,8.6,-1.15,.34,.06],[span*.69,4.1,-2.62,.21,.06],[span,1.55,sweep,.10,rise]];
     if(type==='f16')return [[.45,12,.8,.38,.18],[1.8,6.15,-1.24,.27,.13],[span,1.65,sweep,.1,rise]];
     if(type==='f22')return [[.45,12.6,-.55,.43,.22],[2.15,9.5,-.65,.34,.24],[span*.82,3.95,-2.2,.18,.23],[span,1.65,sweep,.1,rise]];
@@ -227,7 +230,7 @@ function buildPlane(type = 'comet', cells = null, triangleParts = null) {
     fin(1,[0,.27,-5.33,2.95,.14],[0,2.55,-6.29,1.65,.08]);
     return {data:new Float32Array(out),solidEnd:out.length/10,pivots,axes};
   }
-  const tapered=type==='quill'||type==='ogee'||flanker;
+  const tapered=flanker||['quill','ogee','f15','m2000','f5'].includes(type);
   // The angular cross sections give the J-20 a wide shoulder below its canopy.
   const angular=type==='j20'||type==='f22';
   const skin=angular?(z,w,h,y)=>[[0,y+h,z],[-w*.73,y+h*.78,z],[-w*1.55,y+h*.20,z],
@@ -239,9 +242,25 @@ function buildPlane(type = 'comet', cells = null, triangleParts = null) {
   loft([...nose,skin(7.6,.62,.58,.08),skin(5.6,.88,.82,.2),skin(3.2,1.02,.95,.3),skin(.5,1.05,.9,.3),skin(-3.5,1,.8,.25),skin(-7,.8,.6,.2),skin(-8.9,.32,.28,.2)],
     tapered?[RADOME,GREY,GREY,camo,camo,camo,camo,camo,camo]:[RADOME,RADOME,camo,camo,camo,camo,camo,camo]);
   for(const side of spec.singleEngine?[0]:[-1,1]){
-    const cx=side*1.32;
+    const cx=side*spec.engineSpacing;
     component='nacelle';
-    if(spec.singleEngine){
+    if(type==='m2000'){
+      for(const sign of [-1,1]){
+        const scoop=(z,x,w,h)=>[[sign*x,.52,z],[sign*(x+w*.72),.42,z],[sign*(x+w),.04,z],
+          [sign*(x+w*.77),-h*.76,z],[sign*x,-h,z]];
+        loft([scoop(4,.69,.51,.56),scoop(3.83,.65,.65,.70),scoop(1.4,.59,.84,.65),
+          scoop(-3.5,.42,.76,.50)],[DARK,camo,camo]);
+      }
+      loft([ell(-3.3,.98,.68,-.1),ell(-7.1,.87,.71,-.12),ell(-8.38,.75,.69,-.12)],[camo,SLATE]);
+    }else if(type==='f15'){
+      const duct=(z,w,h,lip)=>[[cx-w,.67,z+lip],[cx+w,.67,z+lip],[cx+w,-h,z],[cx-w,-h,z]];
+      loft([duct(4.1,.59,.5,.55),duct(3.88,.70,.64,.55),duct(1.4,.84,.7,.15),
+        duct(-3.3,.83,.64,0),duct(-7.99,.64,.53,0)],[DARK,camo,camo,SLATE]);
+    }else if(type==='f5'){
+      loft([ell(3.2,.29,.44,-.12,8,side*1.03),ell(3,.42,.52,-.12,8,side*1.05),
+        ell(-1.4,.63,.56,-.12,8,side*1.00),ell(-6,.72,.69,-.12,8,cx),
+        ell(-8.4,.70,.68,-.12,8,cx)],[DARK,camo,SLATE,camo]);
+    }else if(spec.singleEngine){
       loft([ell(4.07,.63,.33,-.73,8),ell(4.0,.76,.50,-.7,8),ell(1,.85,.63,-.57,8),
         ell(-4,1,.85,-.29,8),ell(-8.4,.84,.78,-.12,8)],[DARK,camo,camo,camo]);
     }else if(angular){
@@ -251,18 +270,29 @@ function buildPlane(type = 'comet', cells = null, triangleParts = null) {
         intake(-3.7,1.38,.82,.73),intake(-7.9,1.32,.68,.70)],[DARK,camo,camo,camo]);
     }else loft([ell(2.66,.50,.56,-.2,8,side*1.46),ell(2.6,.64,.70,-.2,8,side*1.46),ell(1.5,.80,.82,-.18,8,side*1.42),ell(-2,.90,.86,-.14,8,side*1.36),ell(-6.5,.86,.82,-.12,8,cx),ell(-8.4,.80,.78,-.12,8,cx)],[DARK,camo,camo,camo,camo]);
     component='nozzle';
-    // The rectangular lip, exhaust disc and plume share the pitch hinge.
-    const outlet=type==='f22'?(z,w,h,y,n,x)=>[[x-w,y-h*.51,z],[x-w,y+h*.51,z],[x+w,y+h*.51,z],[x+w,y-h*.51,z]]:ell;
-    loft([outlet(-7.96,.64,.63,-.12,8,cx),outlet(-9.50,.60,.60,-.12,8,cx)],[NOZZLE],11);
-    loft([outlet(-9.53,.51,.51,-.12,8,cx),outlet(-17.53,.025,.025,-.12,8,cx)],[GLOW],12,false);
-    loft([outlet(-9.485,.50,.50,-.12,8,cx),outlet(-9.51,.50,.50,-.12,8,cx)],[GLOW],13);
+    const outlet=(z,w,h)=>{
+      if(!spec.flatOutlet)return ell(z,w,h,-.12,12,cx);
+      return [[cx-w,-.12-h*.56,z],[cx-w,-.12+h*.56,z],[cx+w,-.12+h*.56,z],[cx+w,-.12-h*.56,z]];
+    };
+    const shell=outlet(-9.50,.66,.66),lip=outlet(-9.50,.54,.54);
+    const petals=(_normal,center)=>{
+      const sector=Math.round(6*Math.atan2(center[1]+.12,center[0]-cx)/Math.PI);
+      return sector%2===0?NOZZLE:[.47,.43,.45];
+    };
+    // The outer petals fold back to a hollow rim and a recessed hot core.
+    // All three surfaces remain in the same mesh and share the vector pivot.
+    loft([outlet(-7.96,.71,.69),shell],[petals],11,false);
+    loft([shell,lip],[PALE],11,false);
+    loft([lip,outlet(-8.68,.43,.43)],[DARK],11,false);
+    loft([outlet(-8.68,.43,.43),outlet(-8.69,.43,.43)],[GLOW],13);
+    loft([outlet(-9.53,.51,.51),outlet(-17.53,.025,.025)],[GLOW],12,false);
   }
   if(flanker){
     component='tail fairing';
     loft([ell(-7.2,.54,.4,.28),ell(-9.5,.40,.33,.25),ell(-11.35,.12,.1,.22)],[GREY,SLATE]);
   }
   for(const side of [-1,1]){
-    const cx=side*1.32;
+    const cx=side*spec.engineSpacing;
     wing(side);foreplane(side);
     if(type==='gull'||type==='loom'){
       const high=type==='loom'?2.45:1.72;
@@ -277,8 +307,10 @@ function buildPlane(type = 'comet', cells = null, triangleParts = null) {
       fin(side,[side*4.2,.60,-8.55,3.2,.18],[side*4.2,2.95,-9.15,1.9,.10]);
       component='boom tailplane';hingedBand(foil(0,1.9,-9.25,.14,1.98),foil(side*4.24,1.9,-9.25,.14,1.98),6,side,PALE);
     }else{
-      if(!spec.elevon && type!=='tandem')stabilator(side,spec.singleEngine ? .58 : 1.46,.03,-7.22,3.35,-8.36);
-      if(flanker){
+      if(!spec.elevon && type!=='tandem')stabilator(side,spec.singleEngine ? .58 : spec.engineSpacing+.14,.03,-7.22,3.35,-8.36);
+      if(type==='f15'){
+        fin(side,[cx,.40,-5.95,4.65,.24],[cx+side*.28,4.48,-7.3,1.56,.10]);
+      }else if(flanker){
         fin(side,[side*1.52,.37,-5.9,4.35,.22],[side*1.82,3.85,-7.2,1.7,.11]);
       }else if(angular){
         fin(side,[cx,.35,-6.2,4.3,.24],[side*3.9,3.05,-7.75,1.86,.12]);
@@ -321,12 +353,24 @@ function buildPlane(type = 'comet', cells = null, triangleParts = null) {
       }
     }
   }
+  if(type==='f15'||type==='f5'||type==='m2000'){
+    component='dorsal fairing';
+    const broad=type==='f15';
+    loft([ell(3.0,.47,.28,.96,8),ell(1.15,broad?.69:.49,.36,.98,8),
+      ell(-2.8,broad?.76:.35,.26,.88,8),ell(-5.7,.25,.15,.76,8)],[camo,camo,SLATE]);
+  }
   component='canopy';
   const can=(z,w,h,y)=>[[-w,y-.14,z],[-w*.86,y+.72*h,z],[-w*.36,y+h,z],[w*.36,y+h,z],[w*.86,y+.72*h,z],[w,y-.14,z]];
   if(type==='j16'||type==='f4'){
     loft([can(6.7,.29,.16,.75),can(5.6,.64,.85,.83),can(4.55,.69,.89,.89)],[GLASS],3);
     loft([can(4.55,.69,.89,.89),can(4.32,.72,.91,.91)],[GREY]);
     loft([can(4.32,.72,.91,.91),can(3.35,.72,1.02,.94),can(1.65,.50,.30,.91)],[GLASS],3);
+  }else if(['f15','f5','m2000'].includes(type)){
+    const narrow=type==='f5',front=type==='f15'?6.75:6.32,w=narrow?.53:.67;
+    const bow=can(4.92,w,.77,.89),rail=can(4.79,w+.008,.79,.90);
+    loft([can(front,.21,.12,.75),can(5.58,w*.78,.61,.84),bow],[[.42,.60,.66]],3);
+    loft([bow,rail],[SLATE]);
+    loft([rail,can(3.63,w+.05,narrow?.88:1.07,.94),can(narrow?2.4:1.78,.39,.35,.96)],[[.73,.63,.41]],3);
   }else loft([can(6.5,.28,.10,.75),can(5.5,.60,.8,.80),can(4.1,.70,.98,.90),can(2.7,.5,.42,.91)],[GLASS],3);
   const solidEnd=out.length/10;
   // The cloud is scenery attached to the wing outline. Each ring samples the

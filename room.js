@@ -1,6 +1,12 @@
 const scopeEffects=new Set(['echo','chime','arcWindup','arcBreak','arc','arcHop','glyph','bloom','prism','refract','pulse','burst','laser']);
 class FlightRoom {
   get combat() { return this.mode==='pvp'||this.mode==='pve'; }
+  lockReadout(){
+    const lock=this.mission?.lock;
+    if(!lock)return '锁定预警';
+    const name=this.peers.get(lock.id)?.name||'巡逻机';
+    return name+' · '+(lock.weapon==='ribbon'?'流光':'燕尾')+'蓄锁 '+lock.percent+'%';
+  }
   flareReadout(incoming=false) {
     const {flares,puffs,flareRefill}=this.self;
     if(incoming)return !flares?'来袭 · 热诱弹已耗尽':puffs?'来袭 · 热诱弹连放中':'来袭 · X 热诱弹';
@@ -49,8 +55,8 @@ class FlightRoom {
   async join(room,type,mode='tour',name='',rule='beacon',kit=Outfit.standard) {
     this.leave();
     const version=this.generation;
-    const reply=await this.request('join',{room,type,mode,name,rule,kit,protocol:15});
-    if(reply.mode!==mode||reply.protocol!==15||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw Object.assign(new Error('旧版房主'),{reason:'version'});}
+    const reply=await this.request('join',{room,type,mode,name,rule,kit,protocol:PeerPose.protocol});
+    if(reply.mode!==mode||reply.protocol!==PeerPose.protocol||reply.type!==type) {this.request('leave',{},reply.token).catch(()=>{}); throw Object.assign(new Error('旧版房主'),{reason:'version'});}
     if(version!==this.generation) { this.request('leave',{},reply.token).catch(()=>{}); return null; }
     this.kit=kit;this.weapon=Outfit.first(kit);
     this.token=reply.token; this.id=reply.id;this.name=reply.name;this.mode=mode;this.rule=rule;this.code=reply.room??room; this.status=this.code+' · 1/8'; this.nextSync=0; return reply;
