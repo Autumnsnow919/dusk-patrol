@@ -8,15 +8,23 @@ const Outfit = (() => {
     out[1]-=9*age*age;
     return out;
   }
+  const area={
+    pulse:{radius:145,core:35,damage:12,edge:3,wait:6},
+    echo:{radius:110,core:30,damage:20,edge:5,wait:7,delay:1},
+    glyph:{range:700,radius:85,core:20,damage:22,edge:6,wait:6,delay:1.2}
+  };
+  function areaTip(spec){
+    return `${spec.radius} 米内由中心 ${spec.damage} 点衰减到边缘 ${spec.edge} 点，冷却 ${spec.wait} 秒`;
+  }
   const items=[
     {id:'gun',name:'机炮',cost:2,tip:'对准机头自由射击，连射过热后需冷却'},
     {id:'missile',name:'燕尾格斗弹',cost:4,tip:'近距宽圈，捕获快，冷却短'},
     {id:'laser',name:'激光炮',cost:5,tip:'持续锁定'},
-    {id:'pulse',name:'共鸣脉冲',cost:3,tip:'向周围释放一圈能量'},
+    {id:'pulse',name:'共鸣脉冲',cost:3,tip:'立即向四周释放，'+areaTip(area.pulse)},
     {id:'prism',name:'折光镜阵',cost:2,tip:'展开 1.6 秒，抵消一次命中；冷却 6.5 秒'},
-    {id:'glyph',name:'染光印',cost:3,tip:'给对手所在空域盖章。1.2 秒后仍在光圈内会被染中。'},
+    {id:'glyph',name:'染光印',cost:3,tip:`在目标当前位置盖章，${area.glyph.delay} 秒后生效。`+areaTip(area.glyph)},
     {id:'ribbon',name:'流光远程弹',cost:5,tip:'远距窄圈，近距盲区，蓄锁和冷却较长'},
-    {id:'echo',name:'回声浮标',cost:3,tip:'原地留下紫环，1 秒后响起，触及环内所有对手；冷却 5 秒'},
+    {id:'echo',name:'回声浮标',cost:3,tip:`原地留下紫环，${area.echo.delay} 秒后生效。`+areaTip(area.echo)},
     {id:'arc',name:'跳光链',cost:4,tip:'把目标留在机头圈内 0.9 秒。出圈断链，近处第二架最多受 6 点伤害。冷却 6 秒'}
   ];
   const keys=['Digit1','Digit2','Digit3','Digit4','Digit5','Digit6','Digit8','Digit9','Minus'];
@@ -30,6 +38,6 @@ const Outfit = (() => {
   function describe(mask,active){
     return items.flatMap((item,i)=>has(mask,item.id)?[(active===item.id?'▸ ':'')+keyLabel(i)+' '+item.name]:[]).join('　');
   }
-  return {items,keys,keyLabel,budget,flares,flarePosition,has,cost,valid,first,maskOf,describe,standard:3};
+  return {items,keys,keyLabel,budget,area,flares,flarePosition,has,cost,valid,first,maskOf,describe,standard:3};
 })();
 if(typeof module!=='undefined')module.exports=Outfit;

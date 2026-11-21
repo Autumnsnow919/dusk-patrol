@@ -102,7 +102,7 @@ function chooseAction(arena,drone,opponent,effects){
     }else{
       if(drone[id+'At']>now)continue;
       const reticle=Sight.reticle(id);
-      const ready=reticle?Sight.inRing(body,point,reticle.ring,reticle.reach,reticle.inner):distance<=effects[id].range;
+      const ready=reticle?Sight.inRing(body,point,reticle.ring,reticle.reach,reticle.inner):distance<=(effects[id].range??effects[id].radius);
       if(!ready)continue;
     }
     input.weapon=id;
@@ -181,7 +181,7 @@ class PatrolWaves {
     const circles=[];
     for(const pilot of arena.players.values()){
       if(pilot.bot)continue;
-      if(pilot.echo && pilot.echo.until>arena.time)circles.push({pos:pilot.echo.pos,radius:this.effects.echo.range});
+      if(pilot.echo && pilot.echo.until>arena.time)circles.push({pos:pilot.echo.pos,radius:this.effects.echo.radius});
       if(pilot.glyph && pilot.glyph.until>arena.time)circles.push({pos:pilot.glyph.pos,radius:this.effects.glyph.radius,id:pilot.glyph.id,life:pilot.glyph.life});
     }
     const assignments=new Map(humans.map(h=>[h.id,0]));

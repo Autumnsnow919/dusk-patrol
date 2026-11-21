@@ -14,9 +14,9 @@ const wingHit={hull:.42,local:.78},gearHit={hull:.18,local:1};
 const missileHits={fuselage:{hull:1,local:1},engine:{hull:.62,local:.88},tail:{hull:.54,local:.82},
   leftWing:wingHit,rightWing:wingHit,noseGear:gearHit,leftGear:gearHit,rightGear:gearHit};
 const weapons = {
-  echo:{wait:5,range:155,damage:28},arc:{wait:6,range:Sight.arc.reach,jump:110,damage:14,hopDamage:6},
-  glyph:{wait:4.2,range:700,radius:115,damage:30},prism:{wait:6.5},
-  pulse: {range:290,wait:3.6,damage:23},
+  ...Outfit.area,
+  arc:{wait:6,range:Sight.arc.reach,jump:110,damage:14,hopDamage:6},
+  prism:{wait:6.5},
   gun: { range: 620, wait: 1/Sight.gunRate, damage: 4 },
   missile:Sight.profiles.missile,ribbon:Sight.profiles.ribbon,
   laser: { range: Sight.laser.reach, wait: 4, damage: 100 }
@@ -206,6 +206,14 @@ class Arena {
       this.event('burst',from,to);
     }
   }
+  queueAreaHit(hits,from,to,id,center){
+    if(!this.opponents(from,to) || !to.hp || to.shield>this.time)return;
+    const spec=weapons[id],d2=distance2(center,to.body.pos);
+    if(d2>spec.radius**2)return;
+    const falloff=Math.max(0,Math.sqrt(d2)-spec.core)/(spec.radius-spec.core);
+    const amount=Math.round(spec.damage-(spec.damage-spec.edge)*falloff);
+    hits.push([from,to,amount,undefined,undefined,this.event('damage',from,to,center),id]);
+  }
   beaconSite(){
     return Lake.relayOrder[Math.floor(this.matchTime/Lake.relayDuration)%Lake.relayOrder.length];
   }
@@ -267,10 +275,7 @@ class Arena {
       if(player.echo && this.time>=player.echo.until){
         const center=player.echo.pos;
         this.event('chime',player,player,center,center);
-        for(const peer of this.players.values()){
-          if(this.opponents(player,peer) && peer.hp && distance2(center,peer.body.pos)<=weapons.echo.range**2)
-            hits.push([player,peer,weapons.echo.damage,undefined,undefined,this.event('damage',player,peer,center),'echo']);
-        }
+        for(const peer of this.players.values())this.queueAreaHit(hits,player,peer,'echo',center);
         player.echo=null;
       }
       const mark=player.glyph;
@@ -278,7 +283,7 @@ class Arena {
         const peer=this.players.get(mark.id);
         if(peer?.hp && peer.life===mark.life){
           this.event('bloom',player,peer,mark.pos,mark.pos);
-          if(Math.hypot(...peer.body.pos.map((v,i)=>v-mark.pos[i]))<=weapons.glyph.radius)hits.push([player,peer,weapons.glyph.damage,undefined,undefined,this.event('damage',player,peer,mark.pos),'glyph']);
+          this.queueAreaHit(hits,player,peer,'glyph',mark.pos);
         }
         player.glyph=null;
       }
@@ -326,7 +331,7 @@ class Arena {
       if(!available || !player.fire){player.laser=0;continue;}
       if(player.weapon==='echo'){
         if(player.echoAt<=this.time){
-          player.echoAt=this.time+spec.wait;player.echo={pos:player.body.pos.slice(),until:this.time+1};
+          player.echoAt=this.time+spec.wait;player.echo={pos:player.body.pos.slice(),until:this.time+spec.delay};
           this.event('echo',player,player);
         }
         continue;
@@ -340,10 +345,7 @@ class Arena {
       if(player.weapon==='pulse'){
         if(player.pulseAt<=this.time){
           player.pulseAt=this.time+spec.wait;this.event('pulse',player,player);
-          for(const peer of this.players.values()){
-            if(this.opponents(player,peer) && peer.hp && peer.shield<=this.time &&
-              Math.hypot(...peer.body.pos.map((v,i)=>v-player.body.pos[i]))<=spec.range)hits.push([player,peer,spec.damage]);
-          }
+          for(const peer of this.players.values())this.queueAreaHit(hits,player,peer,'pulse',player.body.pos);
         }
         continue;
       }
@@ -358,7 +360,7 @@ class Arena {
       }
       if(player.weapon==='glyph'){
         if(player.glyphAt<=this.time && Math.hypot(...other.body.pos.map((v,i)=>v-player.body.pos[i]))<=spec.range){
-          player.glyphAt=this.time+spec.wait;player.glyph={id:other.id,life:other.life,pos:other.body.pos.slice(),until:this.time+1.2};
+          player.glyphAt=this.time+spec.wait;player.glyph={id:other.id,life:other.life,pos:other.body.pos.slice(),until:this.time+spec.delay};
           this.event('glyph',player,other);
         }
         continue;

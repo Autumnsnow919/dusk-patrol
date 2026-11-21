@@ -108,7 +108,7 @@ function exerciseDecisions(){
 exerciseDecisions();
 
 function exerciseEquippedActions(){
-  const range={gun:330,missile:900,ribbon:1000,laser:500,pulse:200,arc:300,glyph:450,echo:120,prism:450};
+  const range={gun:330,missile:900,ribbon:1000,laser:500,pulse:95,arc:300,glyph:450,echo:80,prism:450};
   for(const {id} of Outfit.items){
     const game=repeatableArena(),pilot=game.add('pilot','tern');
     game.tick(Flight.tick);

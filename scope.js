@@ -187,12 +187,12 @@ class DuelScope {
         const beam=projectBeam(room.peers.get(event.from)?.displayPos??body.pos,room.peers.get(event.to)?.displayPos??body.pos);
         g.strokeStyle=gold;g.setLineDash([4,5]);path(beam);g.setLineDash([]);
       }
-      if(event.kind==='echo' && age<1){
+      if(event.kind==='echo' && age<Outfit.area.echo.delay){
         g.strokeStyle='#d5a2ff';
-        const edge=project(event.a.map((v,i)=>v+155*cam.B.r[i]));
+        const edge=project(event.a.map((v,i)=>v+Outfit.area.echo.radius*cam.B.r[i]));
         if(from && edge)circle(from,Math.max(3,Math.abs(edge[0]-from[0])));
         circle(from,4+10*(1-age));
-        if(room.hostile({id:event.from}) && event.from!==room.id && Math.hypot(...body.pos.map((v,i)=>v-event.a[i]))<155)
+        if(room.hostile({id:event.from}) && event.from!==room.id && Math.hypot(...body.pos.map((v,i)=>v-event.a[i]))<=Outfit.area.echo.radius)
           areaWarning='回声浮标 · 飞出紫圈';
       }
       if(event.kind==='chime' && age<.5){g.strokeStyle='#e5c8ff';circle(from,8+96*age);}
@@ -204,18 +204,18 @@ class DuelScope {
         const bolt=[start,[mx+6,my-7],[mx-4,my+5],end];
         g.lineWidth=5;path(bolt);g.lineWidth=1;g.strokeStyle='#fff7df';path(bolt);circle(to,5+age*35);
       }
-      if(event.kind==='glyph' && age<1.2){
+      if(event.kind==='glyph' && age<Outfit.area.glyph.delay){
         g.strokeStyle='#f5aedc';
-        const edge=project(event.b.map((v,i)=>v+115*cam.B.r[i]));
+        const edge=project(event.b.map((v,i)=>v+Outfit.area.glyph.radius*cam.B.r[i]));
         if(to && edge){g.lineWidth=2;circle(to,Math.max(3,Math.abs(edge[0]-to[0])));g.lineWidth=1;circle(to,5);}
-        if(room.id===event.to && Math.hypot(...body.pos.map((v,i)=>v-event.b[i]))<=115)areaWarning='染光印 · 飞出粉圈';
+        if(room.id===event.to && Math.hypot(...body.pos.map((v,i)=>v-event.b[i]))<=Outfit.area.glyph.radius)areaWarning='染光印 · 飞出粉圈';
       }
       if(event.kind==='bloom' && age<.55){g.strokeStyle='#fed3ec';circle(to,5+age*74);}
       if((event.kind==='prism'||event.kind==='refract')&&age<.65){
         g.strokeStyle=teal;circle(to,14+18*age);circle(to,18+24*age);
       }
       if(event.kind==='pulse' && from && age<.5){
-        const edge=project(event.a.map((v,i)=>v+290*cam.B.r[i]));
+        const edge=project(event.a.map((v,i)=>v+Outfit.area.pulse.radius*cam.B.r[i]));
         if(edge){
           const radius=Math.max(3,Math.abs(edge[0]-from[0])*Math.min(1,age/.32));
           g.lineWidth=3;circle(from,radius);g.lineWidth=1;circle(from,radius*.92);

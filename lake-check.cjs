@@ -38,8 +38,23 @@ peer.body.pos=site.pos.slice();peer.body.pos[0]+=75;arena.tick(Flight.tick);asse
 arena.matchTime=Lake.relayDuration-.002;arena.tick(Flight.tick);assert.equal(arena.beaconSite(),Lake.relayOrder[1]);
 arena.input(pilot,command('pulse',{kit:10,fire:true}));
 pilot.body.pos=[0,900,0];peer.body.pos=[0,900,80];arena.tick(Flight.tick);assert.equal(peer.hp,100);
-arena.time=pilot.refitAt+.01;arena.input(pilot,command('pulse',{fire:true}));arena.tick(Flight.tick);assert.equal(peer.hp,77);
+arena.time=pilot.refitAt+.01;arena.input(pilot,command('pulse',{fire:true}));arena.tick(Flight.tick);assert.equal(peer.hp,91);
 assert.equal(arena.snapshot(pilot,0).self.kit,10);
+// Same-heading aircraft hold their initial separation through the casting tick.
+{
+  const game=new Arena(0),source=game.add('source','tern','source',null,8);
+  const xs=[30,-90,145,-146],targets=xs.map((x,i)=>game.add('seat'+i,'tern'));
+  [source,...targets].forEach((p,i)=>{
+    p.body=Flight.create('tern',[900+(i?xs[i-1]:0),1400,1500],0);p.shield=0;
+  });
+  const cast=()=>{game.input(source,command('pulse',{fire:true}));game.tick(Flight.tick);};
+  cast();assert.deepEqual(targets.map(p=>p.hp),[88,92,97,100]);
+  assert.equal(source.hp,100);assert.equal(game.snapshot(source,0).self.cool,6);
+  for(let i=0;i<710;i++)cast();
+  assert.equal(game.events.filter(e=>e.kind==='pulse').length,1,'holding fire respects cooldown');
+  for(let i=0;i<12;i++)cast();
+  assert.equal(game.events.filter(e=>e.kind==='pulse').length,2);
+}
 // Both new items fit in one seven-point kit. All distances here are game units.
 const echoArc=(1<<7)|(1<<8);
 assert(Outfit.valid(echoArc));assert.equal(Outfit.cost(echoArc),7);
@@ -82,7 +97,7 @@ for(let i=0;i<122;i++){
   near.body.pos=siteOfEcho.map((n,k)=>n+(k===0?240:0));
   party.tick(Flight.tick);
 }
-assert.equal(selected.hp,58);assert.equal(near.hp,94);assert.equal(sender.hp,100);
+assert.equal(selected.hp,79);assert.equal(near.hp,94);assert.equal(sender.hp,100);
 assert.equal(party.events.filter(e=>e.kind==='chime').length,1);
 const pose=require('./peer-pose.js'),fields=require('./airfields.js');
 for(const p of [sender,selected]){
