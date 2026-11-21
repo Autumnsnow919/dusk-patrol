@@ -42,7 +42,7 @@ const Flight = (() => {
   fleet.j20={...fleet.cirrus,name:'歼-20',role:'双发鸭式 · 外形复刻',noseLength:13.5,wingLevel:false,yawDamper:true};
   fleet.j16={...fleet.comet,name:'歼-16',role:'串列双座 · 外形复刻',noseLength:12.1,roll:3.15,pitch:1.72,yawDamper:true};
   fleet.f4={...fleet.comet,name:'F-4C 鬼怪 II',role:'折翼双座',noseLength:11.8,roll:2.95,yawDamper:true};
-  fleet.f16={...fleet.petrel,name:'F-16A 战隼',role:'单发轻型',singleEngine:true,noseLength:10.8,roll:5.15,landingFlaps:true};
+  fleet.f16={idleAreaReset:true,...fleet.petrel,name:'F-16A 战隼',role:'单发轻型',singleEngine:true,noseLength:10.8,roll:5.15,landingFlaps:true};
   fleet.f22={...fleet.lance,name:'F-22A 猛禽',role:'双尾二维矢量',noseLength:12.4,roll:3.75};
   fleet.f15={...fleet.comet,name:'F-15C 鹰',role:'双垂尾重型',noseLength:13.8,roll:3.45,pitch:1.75,wingLevel:true};
   fleet.m2000={...fleet.delta,name:'幻影 2000C',role:'无平尾三角翼',singleEngine:true,noseLength:12.6,elevon:true,yawDamper:true};
@@ -228,7 +228,7 @@ const Flight = (() => {
       body.vecYaw+=(yaw/limit-body.vecYaw)*response;
       body.vecRoll+=(roll/limit-body.vecRoll)*response;
     }
-    const powerLever=clamp((body.engine-.72)/.28,0,1);
+    const powerLever=highPowerStage(spec,body.engine);
     const boostedThrust=(spec.highPower||0)*powerLever**2*clamp((speed-(body.type==='kite'?120:55))/110,0,1)*
       clamp(rho/1.225,.25,1)*clamp((2.35-body.mach)/.65,.15,1);
     const tilt=body.vector*.50,thrust=boostedThrust/spec.mass+(body.engine*(body.type==='needle'?1+.60*body.deploy:body.type==='sail'?1-body.deploy:1)+1.05*sprint)*fullThrust(spec,speed,rho)/spec.mass;
@@ -277,14 +277,20 @@ const Flight = (() => {
     if(body.grounded){body.stalled=false;if(speed<2){body.alpha=0;body.slip=0;}}
     body.load=body.grounded?1:(accelX*axis.u[0]+accelY*axis.u[1]+accelZ*axis.u[2])/9.81;
   }
-  // Visual travel follows the spooled engine. The lip narrows in dry power
-  // and opens again as the game's high-power stage comes in.
-  function nozzleOpening(spec,engine,deploy=0){
-    const dry=clamp(engine/.72,0,1),wet=clamp((engine-.72)/.28,0,1);
-    const boost=Math.max(spec.highPower?wet:0,spec.auxBurner?deploy:0);
-    return 1.04-.45*dry*(2-dry)+.68*boost*boost*(3-2*boost);
+  function highPowerStage(spec,engine){
+    return spec.highPower?clamp((engine-.72)/.28,0,1):0;
+  }
+  function burnerStage(spec,engine,deploy){
+    return Math.max(highPowerStage(spec,engine),spec.auxBurner?deploy:0);
+  }
+  function nozzleOpening(spec,engine,deploy=0,gear=0){
+    const dry=clamp(engine/(spec.highPower ? .72 : 1),0,1);
+    const idle=spec.idleAreaReset ? .80+.24*gear : 1.04;
+    const throat=.59+(idle-.59)*(1-dry)**2;
+    const wet=burnerStage(spec,engine,deploy);
+    return throat+(1.27-throat)*wet*wet*(3-2*wet);
   }
   function rig(b){return [...b.controls,b.gear,b.vector,b.engine,b.deploy,b.vecYaw,b.vecRoll];}
-  return { fleet, canardAngle, nozzleOpening, rig, create, approach, axes, step, density,soundSpeed,thermal,boomMargin,tick: 1/120 };
+  return { fleet, canardAngle, burnerStage, nozzleOpening, rig, create, approach, axes, step, density,soundSpeed,thermal,boomMargin,tick: 1/120 };
 })();
 if (typeof module !== 'undefined') module.exports = Flight;

@@ -30,6 +30,9 @@ const Airfields = (() => {
   function sector(b,point){
     const dx=point[0]-b.pos[0],dy=point[1]-b.pos[1],dz=point[2]-b.pos[2];
     const dot=v=>dx*v[0]+dy*v[1]+dz*v[2],side=dot(b.basis.r),along=dot(b.basis.f);
+    return localSector(side,along);
+  }
+  function localSector(side,along){
     if(Math.abs(side)>2 && Math.abs(side)>.55*Math.abs(along))return side<0?'leftWing':'rightWing';
     if(along<-3)return Math.abs(side)>1?'engine':'tail';
     return 'fuselage';
@@ -117,6 +120,6 @@ const Airfields = (() => {
     if(!was)body.service=0;body.vel[1]=Math.max(1.2,speed*Math.sin(pitch)*.4);body.pos[1]+=.07;
     }
   }
-  return {strips,at,contact,park,clearance,labels,freshCondition,wear,scrape,brush,sector};
+  return {strips,at,contact,park,clearance,labels,freshCondition,wear,scrape,brush,sector,localSector};
 })();
 if(typeof module!=='undefined')module.exports=Airfields;

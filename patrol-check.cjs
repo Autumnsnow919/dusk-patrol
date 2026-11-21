@@ -44,10 +44,15 @@ tick(1,true);assert.equal(room.shots.length,1);
 assert(room.snapshot(b,0).self.incoming);assert(!room.snapshot(b,0).self.warned);
 const start=room.shots[0].pos.slice();tick(12);assert.notDeepEqual(room.shots[0].pos,start);
 room.input(b,{weapon:'gun',controls:idle,dodge:true});
-assert(!room.snapshot(b,0).self.incoming);assert(room.snapshot(b,0).self.diverted);
-assert(room.shots[0].diverted);const flare=room.events.find(e=>e.kind==='flare');assert(flare.c);
-for(let i=0;i<80;i++)room.tick(Flight.tick);
+const fired=room.shots[0];
+assert(room.snapshot(b,0).self.incoming && !fired.diverted);
+const fresh=room.snapshot(b,0),row=fresh.decoys[0];
+assert(Array.isArray(row));assert.equal(room.snapshot(b,fresh.serial).decoys[0],row[0]);
+while(room.shots.length && room.time-fresh.clock/1000<3)room.tick(Flight.tick);
 assert.equal(b.hp,100);assert.equal(room.shots.length,0);
+assert(fired.diverted && room.snapshot(b,0).self.diverted);
+assert(!room.snapshot(b,0).self.incoming);
+const glow=fired.decoy;assert(glow && glow.pos.some((v,i)=>Math.abs(v-glow.start[i])>2));
 const packets=room.events.filter(e=>e.kind==='flare');
 assert.equal(packets.length,3);assert.equal(b.flareCells,9);
 assert(packets[0].at<packets[1].at && packets[1].at<packets[2].at);
@@ -61,7 +66,7 @@ for(let i=0;i<5/Flight.tick;i++){
 assert.equal(b.life,sortie);
 const releases=room.events.filter(e=>e.kind==='flare');
 assert.equal(releases.length,12);
-assert(releases.at(-1).at-releases[0].at<3.3);
+assert(releases.at(-1).at-releases[3].at<2.1); // Nine rounds held continuously after the first burst.
 for(let i=1;i<12;i++)assert(releases[i].at-releases[i-1].at>=.24-1e-8);
 const empty=room.snapshot(b,0).self;
 assert.equal(empty.flares,0);assert.equal(empty.puffs,0);assert.equal(empty.dodge,0);
@@ -96,19 +101,19 @@ room.tick(Flight.tick);assert.equal(b.flareCells,1);assert.equal(b.life,sortie);
   receiver.flareCells=3;
   sender.body=Flight.create('tern',[900,1450,1500],0);
   receiver.body=Flight.create('tern',[900,1450,1100],0);
-  let cleared=false,followup=false,impact=false;
+  let first=null,followup=false,impact=false;
   for(let i=0;i<10/Flight.tick && !impact;i++){
     game.input(sender,{controls:idle,weapon:'missile',target:receiver.id,fire:true});
     game.tick(Flight.tick);
     const arriving=game.shots.find(s=>!s.diverted);
     if(arriving){
       game.input(receiver,{controls:idle,weapon:'gun',dodge:true});
-      if(!cleared){assert(arriving.diverted);cleared=true;}
-      else{assert(!arriving.diverted);followup=true;}
+      if(!first)first=arriving;
+      else if(first!==arriving){assert.equal(receiver.flareCells,0);followup=true;}
     }
     impact=game.events.some(e=>e.kind==='hit' && e.to===receiver.id);
   }
-  assert(cleared && followup && impact,'the follow-up should reach the player with an empty dispenser');
+  assert(first?.diverted && followup && impact,'the follow-up should reach the player with an empty dispenser');
   assert.equal(receiver.flareCells,0);
 }
 
@@ -292,18 +297,49 @@ for(const [weapon,range,expected] of [['missile',400,true],['ribbon',400,false],
     assert.equal(trial.shots.length,1);assert.equal(trial.snapshot(p,0).shots[0][8],weapon);
     assert(Math.abs(trial.snapshot(p,0).self.cool-Sight.profiles[weapon].wait)<1e-8);
     assert(trial.snapshot(q,0).self.incoming);
-    trial.input(q,{controls:idle,weapon:'gun',dodge:true});assert(trial.shots[0].diverted);
+    trial.input(q,{controls:idle,weapon:'gun',dodge:true});assert(!trial.shots[0].diverted);assert.equal(trial.decoys.length,1);
   }else{
     trial.input(p,{...command,fire:true});trial.tick(Flight.tick);assert.equal(trial.shots.length,0);
   }
 }
 assert.equal(crossing(0,false,false,'ribbon').pilot.hp,0);
 const contact=require('./contacts.cjs');
+assert.equal(contact.orb([-100,0,0],[100,0,0],[0,32.1,0],[0,32.1,0],32),Infinity);
+assert(contact.orb([-100,0,0],[100,0,0],[0,-100,0],[0,100,0],32)<.5);
+assert.equal(contact.orb([-100,0,0],[0,0,0],[0,0,0],[100,0,0],32),Infinity);
+{
+  const game=new Arena(0),p=game.add('p','tern'),q=game.add('q','tern');
+  p.shield=q.shield=0;p.body=Flight.create('tern',[900,1450,1600],0);
+  q.body=Flight.create('tern',[900,1450,-1400],0);
+  const shot=Bolts.launch(1,p,q,'ribbon');game.shots.push(shot);
+  game.input(q,{controls:idle,weapon:'gun',dodge:true});
+  for(let i=0;i<600 && game.shots.length;i++)game.tick(Flight.tick);
+  assert(!shot.diverted);assert(!q.hp);assert(!game.decoys.length);
+}
+{
+  const game=new Arena(0),pilot=game.add('solo','tern');
+  game.input(pilot,{controls:idle,weapon:'gun',dodge:true});
+  for(let i=0;i<60;i++)game.event('spark',pilot,pilot);
+  const sync=game.snapshot(pilot,0);
+  assert(!sync.events.some(e=>e.kind==='flare'));
+  assert(Array.isArray(sync.decoys[0]),'late join reconstructs active effects past the event window');
+  game.remove(pilot.id);assert.equal(game.decoys.length,0);
+}
 const sweeping={prev:[0,100,0],pos:[0,100,30],axes:contact.basisOf([0,0,1])};
 assert(contact.tracer(sweeping,[-20,100,15],[20,100,15])<1);
 assert.equal(contact.tracer(sweeping,[-20,108,15],[20,108,15]),Infinity);
 assert.equal(contact.tracer(sweeping,[-20,100,30],[20,100,30]),Infinity);
 
+{
+  const body=Flight.create('sail',[0,1000,0],0),peer={body,priorPos:body.pos},hit={};
+  assert(contact.gun([-40,1004.6,0],[40,1004.6,0],peer)<1);
+  assert.equal(contact.gun([-40,1005.1,0],[40,1005.1,0],peer),Infinity);
+  assert(contact.gun([body.span+2,1000,-40],[body.span+2,1000,40],peer,hit)<1);
+  assert.equal(hit.part,'rightWing');
+  // Both endpoints miss a fast crossing avatar.
+  peer.priorPos=[-60,1000,0];body.pos=[60,1000,0];
+  assert(contact.gun([0,1000,-40],[0,1000,40],peer)<1);
+}
 const gallery=new Arena(0),gunner=gallery.add('gunner','tern'),runner=gallery.add('runner','tern');
 gunner.shield=runner.shield=0;
 gunner.body=Flight.create('tern',[900,900,1600],0);
@@ -312,14 +348,14 @@ gallery.input(gunner,{controls:idle,target:null,weapon:'gun',fire:true});
 gallery.tick(Flight.tick);assert.equal(runner.hp,100);assert.equal(gallery.tracers.length,1);
 gallery.input(gunner,{controls:idle,target:null,weapon:'gun',fire:false});
 for(let i=0;i<45;i++)gallery.tick(Flight.tick);
-assert.equal(runner.hp,98);assert(runner.body.damaged);assert(runner.body.condition.fuselage<100);
+assert.equal(runner.hp,96);assert(runner.body.damaged);assert(runner.body.condition.fuselage<100);
 // A shot one wing-width off the centerline must damage that wing.
 gunner.gunAt=0;gunner.body=Flight.create('tern',[907,900,1600],0);
 runner.body=Flight.create('tern',[900,900,1400],0);runner.hp=100;
 gallery.input(gunner,{controls:idle,weapon:'gun',fire:true});
 gallery.tick(Flight.tick);gallery.input(gunner,{controls:idle,weapon:'gun',fire:false});
 for(let i=0;i<45;i++)gallery.tick(Flight.tick);
-assert.equal(runner.hp,98);assert(runner.body.condition.rightWing<100);assert.equal(runner.body.condition.leftWing,100);
+assert.equal(runner.hp,96);assert(runner.body.condition.rightWing<100);assert.equal(runner.body.condition.leftWing,100);
 gallery.remove(runner.id);
 gunner.heat=0;
 const previousCount=gunner.gunCount;

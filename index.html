@@ -635,6 +635,11 @@ float bayer4(vec2 fc){ ivec2 i = ivec2(fc) & 3;
   return (float(m[i.x + i.y*4]) + 0.5) / 16.0; }
 void main(){
   vec2 q = gl_PointCoord * 2.0 - 1.0; float r = dot(q, q); if (r > 1.0) discard;
+  if(vData.z==5.){
+    float fade=1.-smoothstep(.72,1.,vData.y);
+    if(r>.065 && bayer4(gl_FragCoord.xy)>fade*(r>.82?.26:.13))discard;
+    o=vec4(r<.018?vec3(1.,1.,.88):r<.065?vec3(1.,.82,.40):vec3(.96,.56,.27),0.);return;
+  }
   if(vData.z>5.5){o=vec4(vData.w<1.?vec3(1.,1.,.82):vec3(1.,.65,.27),0.);return;}
   float age = vData.y;
   float a = (1.0 - smoothstep(0.5, 1.0, age)) * vNear;
@@ -650,10 +655,6 @@ void main(){
   } else if (vData.z < 2.5) {     // fireball: white, gold, orange, ember, soot
     c = age < 0.16 ? vec3(1.0, 0.98, 0.86) : age < 0.42 ? vec3(1.0, 0.86, 0.42) : age < 0.66 ? vec3(0.98, 0.56, 0.22) : age < 0.84 ? vec3(0.80, 0.29, 0.20) : vec3(0.40, 0.27, 0.32);
     if (age > 0.16 && age < 0.66 && r < 0.25) c = min(c + vec3(0.02, 0.12, 0.26), 1.0);     // hotter heart
-  } else if(vData.z > 4.5){
-    vec2 p=abs(q);
-    if(p.x+p.y>.88&&min(p.x,p.y)>.10)discard;
-    c=p.x+p.y<.40?vec3(1.,1.,.94):p.x+p.y<.66?vec3(1.,.84,.47):vec3(.97,.50,.21);
   } else if (vData.z > 3.5) {     // the flash
     c = age < 0.5 ? vec3(1.0, 0.99, 0.93) : vec3(1.0, 0.92, 0.62);
   } else {                        // the dark smoke that hangs afterwards
@@ -822,7 +823,7 @@ const PLANE = {
   gl.bindVertexArray(null);
   let streakStamp=-1,streakCount=0;
   const PART_N = 760;
-  const partData = new Float32Array((PART_N+8+64) * 7);
+  const partData = new Float32Array((PART_N+12+12*Outfit.flares.capacity) * 7);
   const partBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, partBuf); gl.bufferData(gl.ARRAY_BUFFER, partData.byteLength, gl.DYNAMIC_DRAW);
   const partVAO = vao(partBuf, [3, 4], 7);
 
@@ -1062,7 +1063,7 @@ const PLANE = {
   const JS = 1.3;   // the jet is drawn a little larger than life so it reads from high above
   function toWorld(B, p) { return add(S.pos, add(add(mul(B.r, p[0] * JS), mul(B.u, p[1] * JS)), mul(B.f, p[2] * JS))); }
 
-  const flareFans=[];
+  const decoyAge=(d,now)=>(room.tracerClock+now-room.tracerTime)*.001-d.at;
   room.onEffect=event=>{
     audio.event(event,room.id,cam);
     if(event.loss>0 && event.part && (event.from===room.id || event.to===room.id)){
@@ -1071,10 +1072,6 @@ const PLANE = {
       impactUntil=performance.now()+2500;
     }
     if(event.kind==='intercept' && event.from===room.id){notice='机炮拦截成功';noticeUntil=performance.now()+1600;}
-    if(event.kind==='flare'){
-      if(flareFans.length===32)flareFans.shift();
-      flareFans.push({a:event.a,arms:[sub(event.b,event.a),sub(event.c,event.a)],born:performance.now()-Math.min(1200,Math.max(0,(room.tracerClock??0)-event.at*1000)),next:0,cores:[new Float32Array(3),new Float32Array(3)]});
-    }
     if(event.loss>0 || ['hit','spark','burst','fade','intercept'].includes(event.kind)){
       const big=event.kind==='burst'||event.loss>=14;
       spawn(event.b,[0,0,0],.16,big?25:11,4);
@@ -1172,17 +1169,11 @@ const PLANE = {
         shot.smokeAt=now+36;
       }
     }
-    for(let i=flareFans.length-1;i>=0;i--){
-      const fan=flareFans[i],age=(now-fan.born)/1000;
-      if(age>1.35){flareFans.splice(i,1);continue;}
-      const travel=1-Math.exp(-2.8*age),smoke=now>=fan.next;
-      if(smoke)fan.next=now+105;
-      for(let k=0;k<fan.arms.length;k++){
-        const arm=fan.arms[k],p=fan.cores[k];
-        for(let d=0;d<3;d++)p[d]=fan.a[d]+arm[d]*travel;
-        p[1]-=24*age*age;
-        if(smoke)spawn(p,[0,2,0],.61,3.6,3);
-      }
+    for(const d of room.decoys.values()){
+      const age=decoyAge(d,now);
+      if(age<0 || age>=Outfit.flares.life)continue;
+      Outfit.flarePosition(d.start,d.velocity,age,d.pos);
+      if(now>=d.nextSmoke){d.nextSmoke=now+95;spawn(d.pos,[0,2,0],.61,3.6,3);}
     }
 
     // wing-tip vapour, and the furrow the jet wash cuts in the water
@@ -1489,8 +1480,8 @@ const PLANE = {
       gl.uniform4f(pr.u('uWear'),c.fuselage/100,c.leftWing/100,c.rightWing/100,c.tail/100);
       gl.uniform4f(pr.u('uGearWear'),c.leftGear/100,c.rightGear/100,c.noseGear/100,c.engine/100);
       const spec=Flight.fleet[type];
-      const burner=spec.auxBurner?rig[6]:0,opening=Flight.nozzleOpening(spec,rig[5],rig[6])-1;
-      const exhaust=(spec.highPower ? .94*sstep(.72,1,rig[5]):.06*rig[5]**2)+burner*.90;
+      const burner=Flight.burnerStage(spec,rig[5],rig[6]),opening=Flight.nozzleOpening(spec,rig[5],rig[6],rig[3])-1;
+      const exhaust=.94*sstep(0,1,burner);
       gl.uniform4f(pr.u('uOutlet'),spec.flatOutlet?0:opening,opening,spec.engineSpacing,rig[5]);
       const mist=Math.max(0,1-Math.abs(mach-1)/.087)*clamp((1700-pos[1])/800,0,1);
       gl.uniform4f(pr.u('uControls'),rig[0],rig[1],rig[2],rig[3]);
@@ -1565,15 +1556,13 @@ const PLANE = {
       partData[o + 3] = parts.size[i] * (kd === 0 ? 0.7 + a * 2.4 : kd === 2 ? 0.6 + a * 1.0 : kd === 3 ? 0.4 + a * 2.0 : kd === 4 ? 0.7 + a * 0.5 : 1); partData[o + 4] = a; partData[o + 5] = parts.kind[i]; partData[o + 6] = i;
       n++;
     }
-    // Reserve two directly drawn cores per active packet even when smoke is at capacity.
     const flareNow=performance.now();
-    for(const fan of flareFans){
-      const a=Math.max(0,(flareNow-fan.born)/1350);
-      for(let k=0;k<fan.cores.length;k++){
-        const o=n++*7,p=fan.cores[k];
-        partData[o]=p[0];partData[o+1]=p[1];partData[o+2]=p[2];
-        partData[o+3]=(k?5.3:7.5)*(1-.55*a);partData[o+4]=Math.min(1,a);partData[o+5]=5;partData[o+6]=k;
-      }
+    for(const d of room.decoys.values()){
+      const age=decoyAge(d,flareNow);
+      if(age<0 || age>=Outfit.flares.life)continue;
+      const o=n++*7;
+      partData[o]=d.pos[0];partData[o+1]=d.pos[1];partData[o+2]=d.pos[2];
+      partData[o+3]=Outfit.flares.radius*2;partData[o+4]=age/Outfit.flares.life;partData[o+5]=5;partData[o+6]=0;
     }
     if(room.combat && performance.now()-room.tracerTime<220){
       const phase=.5+.5*Math.cos(2*Math.PI*Sight.gunRate*S.time);
@@ -1626,7 +1615,7 @@ const PLANE = {
     inspectParts=false;damageUntil=0;$('damage-panel').hidden=true;
     audio.setActive(false);
     outfit.close();$('lake-chart').hidden=true;
-    watchId=null;onlineSortie=false;$('title').classList.remove('gone');S.view=S.prev=0;S.viewT=1;flareFans.length=0;
+    watchId=null;onlineSortie=false;$('title').classList.remove('gone');S.view=S.prev=0;S.viewT=1;
     releaseKeys(); flying=false; room.leave(); $('hangar').hidden=false; $('strip').hidden=true;
     $('strip').classList.remove('seated');
     $('scope').hidden=true;$('launch-note').textContent='';displayCard();$('mode').focus();
@@ -1815,7 +1804,7 @@ const PLANE = {
     const runway=Airfields.at(body.pos[0],body.pos[2]);
     const gearInfo=body.grounded?'地面 · '+(keys.has('KeyZ')?'刹车':S.speed<2?'R 加油门':'抬轮参考 '+Math.round(body.rotateSpeed*3.6)+' km/h · S 抬头'):
       runway&&body.pos[1]-runway.y<90?'跑道上方 '+Math.round(body.pos[1]-runway.y)+' m · 垂速 '+S.vs.toFixed(1)+' m/s':body.updraft>.2?'上升气流 +'+body.updraft.toFixed(1)+' m/s':S.g.toFixed(1)+' G';
-    $('telemetry').textContent=Math.round(S.speed*3.6)+' km/h　M '+body.mach.toFixed(2)+'　'+Math.round(S.pos[1])+' m　'+Math.round(body.throttle*100)+'% 油门　'+gearLabel+'　'+gearInfo;
+    $('telemetry').textContent=Math.round(S.speed*3.6)+' km/h　M '+body.mach.toFixed(2)+'　'+Math.round(S.pos[1])+' m　'+Math.round(body.throttle*100)+'% 油门'+(Flight.burnerStage(Flight.fleet[body.type],body.engine,body.deploy)>.005?' · 加力':'')+'　'+gearLabel+'　'+gearInfo;
     const peers=room.combat?[]:[...room.peers.values()].map(peer=> {
       const delta=sub(nearest(peer.pos,S.pos),S.pos), bearing=(Math.atan2(delta[0],-delta[2])*180/Math.PI+360)%360;
       return peer.name+' '+Math.round(Math.hypot(...delta))+' m / '+Math.round(bearing)+'°';
@@ -1888,7 +1877,7 @@ const PLANE = {
     $('trait-state').textContent=(watched?'观测 '+watched.name+'　':'')+(S.view===3&&orbit.anchor?'定点观测':VIEWS[S.view])+'　/　'+(active?'V ':'')+spec.trait+
       (active?(spec.unstable?(rig[6]>.5?' · 增稳放宽':' · 自动增稳'):(rig[6]>.06?' · 已展开':' · 待命')):'')+(!watched&&type==='pulse'?'　电量 '+Math.round(body.charge*100)+'%':'')+
       (spec.canard?'　前翼 左 '+Math.round(-Flight.canardAngle(spec,rig[0],rig[2],rig[6],-1)*180/Math.PI)+'° / 右 '+Math.round(-Flight.canardAngle(spec,rig[0],rig[2],rig[6],1)*180/Math.PI)+'°':'')+
-      nozzle+(spec.shaft?'':'　喷口开度 '+Math.round(100*Flight.nozzleOpening(spec,rig[5],rig[6])/(spec.highPower?1.27:1.04))+'%')+(!watched&&(spec.vector||spec.unstable)?'　迎角 '+Math.round(body.alpha*180/Math.PI)+'°':'');
+      nozzle+(spec.shaft?'':(Flight.burnerStage(spec,rig[5],rig[6])>.005?'　加力':'　无加力')+' · 喷口相对开度 '+Math.round(100*Flight.nozzleOpening(spec,rig[5],rig[6],rig[3])/(spec.highPower?1.27:1.04))+'%')+(!watched&&(spec.vector||spec.unstable)?'　迎角 '+Math.round(body.alpha*180/Math.PI)+'°':'');
   }
 
   const audio=new FlightAudio(Sight.gunRate);

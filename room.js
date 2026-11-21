@@ -15,7 +15,7 @@ class FlightRoom {
   }
   hostile(peer) { return this.mode==='pvp'||(this.mode==='pve'&&peer.id.startsWith('ai-')); }
   constructor() {
-    this.peers=new Map();this.marks=new Map();this.shots=new Map();this.tracers=new Map();this.seenTracer=0; this.generation=0; this.status='单人飞行'; this.nextSync=0;
+    this.decoys=new Map();this.peers=new Map();this.marks=new Map();this.shots=new Map();this.tracers=new Map();this.seenTracer=0; this.generation=0; this.status='单人飞行'; this.nextSync=0;
   }
   cycleTarget() {
     const peers=[...this.peers.values()].filter(p=>p.hp&&this.hostile(p));
@@ -45,7 +45,7 @@ class FlightRoom {
     return response.json();
   }
   leave() {
-    this.marks.clear();
+    this.decoys.clear();this.marks.clear();
     if(this.token) this.request('leave',{},this.token).catch(()=>{});
     this.triggerTap=false;this.tracerTime=-Infinity;this.token=null; this.generation++; this.busy=false; this.peers.clear(); this.shots.clear();this.tracers=new Map();this.seenTracer=0;this.name=''; this.status='单人飞行';
     this.hurt=null;this.strike=null;
@@ -74,7 +74,7 @@ class FlightRoom {
       if(duel && this.pendingKit!==null)command.kit=this.pendingKit;
       if(duel && Sight.profiles[this.weapon])command.autoFocus=!this.manualTarget && !launch;
       this.triggerTap=false;this.dodge=false;
-      const {peers,self:wireSelf,events,serial,harbor,shots,tracers,clock,tracerSeq,live,mission,tracking}=await this.request('sync',command,this.token);
+      const {peers,self:wireSelf,events,serial,harbor,shots,tracers,clock,tracerSeq,live,mission,tracking,decoys=[]}=await this.request('sync',command,this.token);
       if(version!==this.generation) return;
       const keep=new Set();
       for(let i=0;i<peers.length;i++){
@@ -97,6 +97,15 @@ class FlightRoom {
           if(range===live.length || id<live[range])this.tracers.delete(id);
         }
         this.seenTracer=tracerSeq;this.tracerClock=clock;this.tracerTime=performance.now();
+        const liveDecoys=new Set();
+        for(const row of decoys){
+          if(Array.isArray(row)){
+            const [id,at,start,velocity]=row;
+            this.decoys.set(id,{at,start,velocity,pos:start.slice(),nextSmoke:0});
+            liveDecoys.add(id);
+          }else liveDecoys.add(row);
+        }
+        for(const id of this.decoys.keys())if(!liveDecoys.has(id))this.decoys.delete(id);
         this.kit=self.kit;
         if(this.pendingKit===self.kit)this.pendingKit=null;
         if(!Outfit.has(self.kit,this.weapon))this.selectWeapon(self.weapon);

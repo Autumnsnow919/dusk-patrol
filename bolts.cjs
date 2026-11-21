@@ -16,12 +16,13 @@ function launch(id,from,to,type='missile'){
   else leg(shot,to.body.pos,.52,.38+distance/2600,18);
   return shot;
 }
-function divert(shot,point){
+function divert(shot,decoy){
   if(shot.diverted)return;
-  shot.diverted=true;shot.attached=false;leg(shot,point,1,.46,15);
+  shot.diverted=true;shot.attached=false;shot.decoy=decoy;leg(shot,decoy.pos,1,.46,3);
 }
 function move(shot,target,dt){
   if(!target?.hp||target.life!==shot.life)return 'fade';
+  if(shot.decoy)for(let i=0;i<3;i++)shot.end[i]=shot.decoy.pos[i];
   if(shot.attached){
     const [pitch,,roll]=target.body.controls;
     shot.dodgeTime=Math.abs(roll)>.72 || Math.abs(pitch)>.78?shot.dodgeTime+dt:0;

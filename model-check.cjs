@@ -137,9 +137,10 @@ for(const type of Object.keys(Flight.fleet)){
       return [0,1].map(i=>Math.max(...points.map(p=>p[i]))-Math.min(...points.map(p=>p[i])));
     };
     const idle=widthHeight(0),dry=widthHeight(.72),full=widthHeight(1);
-    assert(dry[1]<idle[1]*.65,type+' exhaust closes');
+    assert(dry[1]<idle[1]*.81,type+' dry exhaust closes');
+    if(spec.idleAreaReset){b.gear=1;assert(widthHeight(0)[1]>idle[1]*1.2);b.gear=0;}
     if(spec.highPower)assert(full[1]>dry[1]*1.8,type+' exhaust opens again');
-    assert(spec.flatOutlet?Math.abs(idle[0]-dry[0])<1e-6:dry[0]<idle[0]*.65,type+' nozzle shape');
+    assert(spec.flatOutlet?Math.abs(idle[0]-dry[0])<1e-6:dry[0]<idle[0]*.81,type+' nozzle shape');
   }
   const cloud=all.filter(c=>c.mat===14);
   if(type==='rv8a'||type==='sail')assert.equal(cloud.length,0);

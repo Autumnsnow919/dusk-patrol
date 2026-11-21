@@ -64,10 +64,12 @@ function chooseAction(arena,drone,opponent,effects){
   const hurt=drone.hp<drone.lastHealth;
   drone.lastHealth=drone.hp;
   if(hurt && Outfit.has(drone.kit,'prism') && drone.prismAt<=now && drone.prismDue===null)drone.prismDue=now+.7;
-  const incoming=drone.flareCells>0 && arena.shots.some(s=>s.to===drone.id && s.life===drone.life && !s.diverted);
+  for(const id of drone.flareThreats)if(!arena.shots.some(s=>s.id===id))drone.flareThreats.delete(id);
+  const incoming=drone.flareCells>0 && arena.shots.find(s=>s.to===drone.id && s.life===drone.life && !s.diverted && !drone.flareThreats.has(s.id));
   if(!incoming)drone.alertAt=null;
   else if(drone.alertAt===null)drone.alertAt=now+(drone.fire?1.2:.65)+.12*drone.lane;
-  input.dodge=incoming && now>=drone.alertAt && drone.shield<=now;
+  input.dodge=!!incoming && now>=drone.alertAt && drone.shield<=now && !drone.puffs && now>=drone.puffAt;
+  if(input.dodge){drone.flareThreats.add(incoming.id);drone.alertAt=null;}
   if(drone.shield>now || drone.refitAt>now)return input;
   if(drone.arcCast){input.weapon='arc';input.target=drone.arcCast.id;return input;}
   if(drone.prismDue!==null && drone.prismDue<=now){
@@ -147,7 +149,7 @@ class PatrolWaves {
       drone.route='patrol';drone.partner=null;drone.gate=null;drone.partnerLife=0;
       drone.pack=Outfit.items.filter(item=>Outfit.has(kit,item.id)).map(item=>item.id);
       drone.slotCursor=this.drawIndex(drone.pack.length);
-      drone.lastHealth=100;drone.prismDue=null;drone.alertAt=null;drone.burstEnd=0;drone.gunRest=0;drone.nextAction=0;
+      drone.lastHealth=100;drone.prismDue=null;drone.alertAt=null;drone.flareThreats=new Set();drone.burstEnd=0;drone.gunRest=0;drone.nextAction=0;
       const atField=entry && [...arena.players.values()].some(p=>!p.bot && flatDistance(p.body.pos,[900,1050,560])<1500);
       if(atField){
         drone.body=Flight.create(type,[930,1050,-570],Math.PI);

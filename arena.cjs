@@ -17,7 +17,7 @@ const weapons = {
   echo:{wait:5,range:155,damage:28},arc:{wait:6,range:Sight.arc.reach,jump:110,damage:14,hopDamage:6},
   glyph:{wait:4.2,range:700,radius:115,damage:30},prism:{wait:6.5},
   pulse: {range:290,wait:3.6,damage:23},
-  gun: { range: 620, wait: 1/Sight.gunRate, damage: 2 },
+  gun: { range: 620, wait: 1/Sight.gunRate, damage: 4 },
   missile:Sight.profiles.missile,ribbon:Sight.profiles.ribbon,
   laser: { range: Sight.laser.reach, wait: 4, damage: 100 }
 };
@@ -34,7 +34,7 @@ class Arena {
   constructor(now,rule='beacon',patrolDraw) {
     this.mission=rule==='waves'?new PatrolWaves(weapons,groundAt,patrolDraw):null;
     this.rule=rule;this.starId=null;this.starTime=0;
-    this.time=0; this.matchTime=0; this.last=now; this.acc=0; this.players=new Map(); this.events=[]; this.tracers=[];this.tracerId=0;this.shots=[]; this.shotId=0; this.serial=0; this.holder=null; this.hold=0; this.zoneCount=0;
+    this.time=0; this.matchTime=0; this.last=now; this.acc=0; this.players=new Map(); this.events=[]; this.tracers=[];this.tracerId=0;this.shots=[];this.decoys=[]; this.shotId=0; this.serial=0; this.holder=null; this.hold=0; this.zoneCount=0;
   }
   add(id,type='comet',name=id,botSlot=null,kit=Outfit.standard) {
     if(!Object.hasOwn(Flight.fleet,type)||!Flight.fleet[type].pvp)throw new Error('Invalid arena airframe');
@@ -52,6 +52,7 @@ class Arena {
   }
   remove(id) {
     this.tracers=this.tracers.filter(t=>t.owner!==id);
+    this.decoys=this.decoys.filter(d=>d.owner!==id);
     this.players.delete(id); this.shots=this.shots.filter(shot=>shot.from!==id&&shot.to!==id);
     if(this.players.size<2){
       this.holder=null; this.hold=0; this.zoneCount=0; this.starId=null; this.starTime=0;
@@ -155,12 +156,20 @@ class Arena {
     player.flareCells--;player.puffs--;player.puffAt=this.time+Outfit.flares.interval;
     const side=player.flareCells%2?1:-1;
     const start=b.pos.map((v,i)=>v+side*r[i]*2-7*f[i]);
-    const end=start.map((v,i)=>v+b.vel[i]*.19+r[i]*side*49-f[i]*40-u[i]*18);
-    const e=this.event('flare',player,player,start,end);
-    e.c=end.map((v,i)=>v+side*18*r[i]+6*u[i]);
-    // Each coloured packet spends one arcade diversion token.
-    const shot=this.shots.find(s=>!s.diverted && s.to===player.id && s.life===player.life);
-    if(shot){Bolts.divert(shot,end);player.divertUntil=this.time+1.4;}
+    const velocity=b.vel.map((v,i)=>v*.83+r[i]*side*46-f[i]*26-u[i]*10);
+    const e=this.event('flare',player,player,start,start);
+    this.decoys.push({id:e.seq,owner:player.id,life:player.life,at:this.time,start,velocity,prev:start.slice(),pos:start.slice(),
+      wire:[e.seq,this.time,start,velocity]});
+  }
+  moveDecoys(dt){
+    for(let i=this.decoys.length-1;i>=0;i--){
+      const d=this.decoys[i],age=this.time-d.at,owner=this.players.get(d.owner);
+      if(age>=Outfit.flares.life || !owner?.hp || d.life!==owner.life){this.decoys.splice(i,1);continue;}
+      Outfit.flarePosition(d.start,d.velocity,Math.max(0,age-dt),d.prev);
+      Outfit.flarePosition(d.start,d.velocity,age,d.pos);
+      const [x,y,z]=d.pos;
+      if((y<420 && y<=Math.max(0,groundAt(x,z))) || (y<Lake.sceneryTop+1 && Lake.touches(d.pos,.5)))this.decoys.splice(i,1);
+    }
   }
   event(kind,from,to,a=from.body.pos,b=to.body.pos) {
     this.events.push({seq:++this.serial,kind,from:from.id,to:to.id,a:a.slice(),b:b.slice(),at:this.time});
@@ -372,6 +381,7 @@ class Arena {
     }
     // Finite-lived arcade streaks. Sample the short tick segment in order so scenery
     // in front of an avatar absorbs the shot first, even on a fast crossing.
+    this.moveDecoys(dt);
     const contacts=[];
     for(const shot of this.shots){
       const target=this.players.get(shot.to),from=this.players.get(shot.from);
@@ -379,6 +389,13 @@ class Arena {
       const ended=Bolts.move(shot,target,dt),wall=Bolts.obstacle(shot);
       if(wall<=1)contacts.push({at:wall,kind:'fade',shot,from});
       else if(ended)contacts.push({at:1,kind:'fade',expires:true,shot,from});
+      if(!shot.diverted){
+        for(const d of this.decoys){
+          if(d.owner!==shot.to || d.life!==shot.life || d.at>=this.time)continue;
+          const at=Contact.orb(shot.prev,shot.pos,d.prev,d.pos,Outfit.flares.radius);
+          if(at<=1)contacts.push({at,kind:'divert',shot,decoy:d,peer:target});
+        }
+      }
       const detail={};
       for(const peer of this.players.values()){
         if(!peer.hp||!from||!this.opponents(from,peer)||peer.shield>this.time)continue;
@@ -386,54 +403,55 @@ class Arena {
         if(at<=1)contacts.push({at,kind:'hit',shot,from,peer,part:detail.part});
       }
     }
-    const nearby=[];
+    const gunContact={},end=[0,0,0];
     for(let i=this.tracers.length-1;i>=0;i--){
       const t=this.tracers[i],owner=this.players.get(t.owner);
       t.age+=dt;
-      let done=!owner || owner.life!==t.life || t.age>Sight.streakLife;
+      if(!owner || owner.life!==t.life || t.age>Sight.streakLife){this.tracers.splice(i,1);continue;}
       t.vel[1]-=18*dt;
-      const [px,py,pz]=t.pos,ex=t.vel[0]*dt,ey=t.vel[1]*dt,ez=t.vel[2]*dt;
-      if(!done && this.shots.length){
-        const end=[px+ex,py+ey,pz+ez];
-        for(const shot of this.shots){
-          if(this.mission && !this.opponents(owner,this.players.get(shot.from)))continue;
-          const at=Contact.tracer(shot,t.pos,end);
-          if(at<=1)contacts.push({at,kind:'intercept',shot,t,from:owner});
-        }
+      const start=t.pos;
+      for(let k=0;k<3;k++)end[k]=start[k]+t.vel[k]*dt;
+      for(const shot of this.shots){
+        if(this.mission && !this.opponents(owner,this.players.get(shot.from)))continue;
+        const at=Contact.tracer(shot,start,end);
+        if(at<=1)contacts.push({at,kind:'intercept',shot,t,from:owner});
       }
-      const scenery=Math.min(py,py+ey)<=Math.max(420,Lake.sceneryTop+1);
-      nearby.length=0;
       for(const peer of this.players.values()){
-        if(!owner || !this.opponents(owner,peer) || !peer.hp || peer.shield>this.time)continue;
-        const p=peer.body.pos;
-        if(Math.abs(p[0]-px)<=16+Math.abs(ex) && Math.abs(p[1]-py)<=16+Math.abs(ey) &&
-           Math.abs(p[2]-pz)<=16+Math.abs(ez))nearby.push(peer);
-      }
-      if(!done && !scenery && !nearby.length){
-        t.pos[0]+=ex;t.pos[1]+=ey;t.pos[2]+=ez;continue;
-      }
-      const steps=Math.max(1,Math.ceil(Math.hypot(ex,ey,ez)/3)),slice=dt/steps;
-      for(let k=0;!done && k<steps;k++){
-        for(let d=0;d<3;d++)t.pos[d]+=slice*t.vel[d];
-        const [x,y,z]=t.pos,field=y<185 && Fields.at(x,z);
-        if((y<420 && y<=Math.max(0,groundAt(x,z))) || (field && Math.abs(y-field.y)<2.5) || (scenery && Lake.touches(t.pos,.5))){done=true;contacts.push({at:(k+1)/steps,kind:'wall',t});break;}
-        for(const peer of nearby){
-          const b=peer.body,dx=x-b.pos[0],dy=y-b.pos[1],dz=z-b.pos[2];
-          if(dx*dx+dy*dy+dz*dz>245)continue;
-          const dot=a=>dx*a[0]+dy*a[1]+dz*a[2];
-          if((dot(b.basis.r)/(b.span+1))**2+(dot(b.basis.u)/3.5)**2+(dot(b.basis.f)/12)**2>1)continue;
-          contacts.push({at:(k+1)/steps,kind:'spark',t,peer,from:owner,point:t.pos.slice()});
-          done=true;break;
+        if(!this.opponents(owner,peer) || !peer.hp || peer.shield>this.time)continue;
+        const at=Contact.gun(start,end,peer,gunContact);
+        if(at<=1){
+          const point=start.map((v,k)=>v+(end[k]-v)*at);
+          contacts.push({at,kind:'spark',t,peer,from:owner,point,part:gunContact.part});
         }
       }
-      if(done)this.tracers.splice(i,1);
+      if(Math.min(start[1],end[1])<=Math.max(420,Lake.sceneryTop+1)){
+        const steps=Math.max(1,Math.ceil(Math.hypot(...t.vel)*dt/3));
+        const point=[0,0,0];
+        const wallAt=at=>{
+          for(let k=0;k<3;k++)point[k]=start[k]+(end[k]-start[k])*at;
+          const [x,y,z]=point,field=y<185 && Fields.at(x,z);
+          return (y<420 && y<=Math.max(0,groundAt(x,z))) || (field && Math.abs(y-field.y)<2.5) || Lake.touches(point,.5);
+        };
+        for(let k=0;k<=steps;k++)if(wallAt(k/steps)){
+          let lo=Math.max(0,k-1)/steps,hi=k/steps;
+          for(let n=0;n<5 && lo<hi;n++){const mid=(lo+hi)*.5;if(wallAt(mid))hi=mid;else lo=mid;}
+          contacts.push({at:hi,kind:'wall',t});break;
+        }
+      }
+      for(let k=0;k<3;k++)t.pos[k]=end[k];
     }
     if(contacts.length){
       // Resolve in sub-tick order so a later intercept cannot cancel an earlier impact.
-      const spentShots=new Set(),spentRounds=new Set();
-      contacts.sort((a,b)=>a.at-b.at || Number(!!a.expires)-Number(!!b.expires));
-      for(const {at,kind,shot,t,from,peer,point,part} of contacts){
-        if(spentShots.has(shot)||spentRounds.has(t))continue;
+      const spentShots=new Set(),spentRounds=new Set(),diversions=new Set();
+      const priority=c=>c.expires?3:c.kind==='divert'?2:c.kind==='wall'||c.kind==='fade'?0:1;
+      contacts.sort((a,b)=>a.at-b.at || priority(a)-priority(b));
+      for(const {at,kind,shot,t,from,peer,point,part,decoy} of contacts){
+        if(spentShots.has(shot)||spentRounds.has(t)||diversions.has(shot))continue;
+        if(kind==='divert'){
+          for(let i=0;i<3;i++)shot.pos[i]=shot.prev[i]+(shot.pos[i]-shot.prev[i])*at;
+          Bolts.divert(shot,decoy);peer.divertUntil=this.time+1.4;
+          diversions.add(shot);continue;
+        }
         if(t)spentRounds.add(t);if(shot)spentShots.add(shot);
         if(kind==='wall'||!from)continue;
         const p=point||shot.prev.map((v,i)=>v+(shot.pos[i]-v)*at);
@@ -446,7 +464,7 @@ class Arena {
         if(kind==='hit'){
           const base=weapons[shot.type].damage,loss=missileHits[part];
           hits.push([from,peer,base*loss.hull,part,base*loss.local,effect,shot.type]);
-        }else if(kind==='spark')hits.push([from,peer,weapons.gun.damage,Fields.sector(peer.body,p),undefined,effect,'gun']);
+        }else if(kind==='spark')hits.push([from,peer,weapons.gun.damage,part,undefined,effect,'gun']);
       }
       if(spentShots.size)this.shots=this.shots.filter(s=>!spentShots.has(s));
       if(spentRounds.size)this.tracers=this.tracers.filter(t=>!spentRounds.has(t));
@@ -516,6 +534,7 @@ class Arena {
         incoming:this.shots.some(shot=>!shot.diverted&&shot.to===player.id&&shot.life===player.life)},
       shots:this.shots.map(s=>[s.id,...rounded(s.pos,10),s.diverted?1:0,...rounded(s.axes.f,1000),s.type,+(!s.diverted && s.to===player.id && s.life===player.life)]),
       events:this.events.filter(event=>event.seq>after && this.time-event.at<1.5),serial:this.serial};
+    if(this.decoys.length)result.decoys=this.decoys.map(d=>d.id>after?d.wire:d.id);
     if(Sight.profiles[player.weapon])result.tracking={focus:player.focus,marks:[...player.marks].map(([id,mark])=>[id,Sight.percent(mark.time,Sight.profiles[player.weapon].fill)])};
     if(this.mission){
       result.mission=this.mission.snapshot(this.time,this.players.get(player.target));

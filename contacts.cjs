@@ -2,6 +2,7 @@
 const {buildPlane,AirframeJoints,damageZones}=require('./airframes.js');
 const Lake=require('./lake.js');
 const Flight=require('./flight.js');
+const Fields=require('./airfields.js');
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
@@ -110,7 +111,7 @@ function posed(vertex,mat,b){
   else if(mat===11){
     const spec=Flight.fleet[b.type],center=Math.sign(p[0])*spec.engineSpacing;
     const travel=Math.min(1,Math.max(0,(-8.4-p[2])/1.1));
-    const scale=1+travel*(Flight.nozzleOpening(spec,b.engine,b.deploy)-1);
+    const scale=1+travel*(Flight.nozzleOpening(spec,b.engine,b.deploy,b.gear)-1);
     if(!spec.flatOutlet)p[0]=center+(p[0]-center)*scale;
     p[1]=-.12+(p[1]+.12)*scale;
     rotate(1,2,-.12,-8.4,.50*(b.vector+Math.sign(p[0])*b.vecRoll));
@@ -149,6 +150,31 @@ function sweptApart(a,b,c,d,limit){
   }
   return false;
 }
+// First shared instant in the unit sphere, including starts inside the volume.
+function sphereTime(x,y,z,vx,vy,vz){
+  const c=x*x+y*y+z*z-1;
+  if(c<=0)return 0;
+  const b=x*vx+y*vy+z*vz,a=vx*vx+vy*vy+vz*vz,disc=b*b-a*c;
+  if(b>=0||disc<0)return Infinity;
+  const t=c/(-b+Math.sqrt(disc));
+  return t<=1?t:Infinity;
+}
+function orb(start,end,prev,pos,r){
+  if(sweptApart(start,end,prev,pos,r))return Infinity;
+  const a=sub(start,prev),b=sub(end,pos);
+  return sphereTime(a[0]/r,a[1]/r,a[2]/r,(b[0]-a[0])/r,(b[1]-a[1])/r,(b[2]-a[2])/r);
+}
+function gun(start,end,peer,detail){
+  const b=peer.body,wing=b.span+3,nose=Math.max(15,(Flight.fleet[b.type].noseLength||10.4)*1.3+1.8);
+  if(sweptApart(start,end,peer.priorPos,b.pos,Math.max(wing,nose)))return Infinity;
+  const a=local(sub(start,peer.priorPos),b.basis),z=local(sub(end,b.pos),b.basis);
+  const at=sphereTime(a[0]/wing,a[1]/5,a[2]/nose,(z[0]-a[0])/wing,(z[1]-a[1])/5,(z[2]-a[2])/nose);
+  if(at<=1 && detail){
+    const side=a[0]+(z[0]-a[0])*at,along=a[2]+(z[2]-a[2])*at;
+    detail.part=Math.abs(side)>.35*b.span?(side<0?'leftWing':'rightWing'):Fields.localSector(side,along);
+  }
+  return at;
+}
 function plane(shot,body,previous=body.pos,detail){
   if(sweptApart(shot.prev,shot.pos,previous,body.pos,32+radius))return Infinity;
   return contact(shot,body.type,previous,body.pos,body.basis,body,detail);
@@ -174,4 +200,4 @@ function tracer(shot,from,to){
   }
   return first;
 }
-module.exports={prepare:model,posed,basisOf,unit,plane,scenery,tracer,radius};
+module.exports={prepare:model,posed,basisOf,unit,plane,scenery,tracer,radius,gun,orb};

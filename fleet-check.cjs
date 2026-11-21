@@ -190,7 +190,7 @@ async function networkCheck(){
     assert.deepEqual(tourPeer.rig,tourPose.rig);assert.equal(tourPeer.type,'opal');
     for(const [i,type] of types.slice(7).entries())assert.equal((await join(type,'pvp','EXTRA'+Math.floor(i/8))).status,200);
     const tickets=await Promise.all([...types.slice(0,7),'kite'].map(type=>join(type)));
-    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===17));
+    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===18));
     assert.equal((await join('swift')).status,409);
     const results=await Promise.all(tickets.map(ticket=>call('sync',{controls:{...neutral,vector:true,pitch:1},weapon:'gun',type:'untrusted'},ticket.token)));
     results.forEach((state,index)=>{assert.equal(state.self.type,tickets[index].type);assert.equal(state.peers.length,7);});

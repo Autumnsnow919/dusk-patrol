@@ -219,12 +219,12 @@ function exerciseWarning(){
   game.shots.push(shot);
   const run=seconds=>{for(let i=0;i<Math.round(seconds/Flight.tick);i++)game.tick(Flight.tick);};
   run(.6);assert(!shot.diverted);assert.equal(drone.flareCells,12);
-  run(1.3);assert(shot.diverted);assert.equal(drone.flareCells,9);
+  run(1.3);assert(!shot.diverted);assert.equal(drone.flareCells,9);
   assert.equal(game.events.filter(e=>e.from===drone.id && e.kind==='flare').length,3);
   const followup=require('./bolts.cjs').launch(2,pilot,drone,'ribbon');
   game.shots.push(followup);
   run(1.8);
-  assert(followup.diverted);assert.equal(drone.flareCells,6);
+  assert(!followup.diverted);assert.equal(drone.flareCells,6);
   assert(game.snapshot(drone,0).self.flareRefill>55);
 }
 exerciseWarning();

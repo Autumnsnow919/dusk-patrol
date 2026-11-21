@@ -1,6 +1,13 @@
 const Outfit = (() => {
   const budget=7;
-  const flares={capacity:12,burst:3,refill:60,interval:.24};
+  const flares={capacity:12,burst:3,refill:60,interval:.24,life:1.8,radius:32};
+  // Animated club decoy: the room and the renderer sample the same trajectory.
+  function flarePosition(start,velocity,age,out){
+    const travel=age/(1+.80*age);
+    for(let i=0;i<3;i++)out[i]=start[i]+velocity[i]*travel;
+    out[1]-=9*age*age;
+    return out;
+  }
   const items=[
     {id:'gun',name:'机炮',cost:2,tip:'对准机头自由射击，连射过热后需冷却'},
     {id:'missile',name:'燕尾格斗弹',cost:4,tip:'近距宽圈，捕获快，冷却短'},
@@ -23,6 +30,6 @@ const Outfit = (() => {
   function describe(mask,active){
     return items.flatMap((item,i)=>has(mask,item.id)?[(active===item.id?'▸ ':'')+keyLabel(i)+' '+item.name]:[]).join('　');
   }
-  return {items,keys,keyLabel,budget,flares,has,cost,valid,first,maskOf,describe,standard:3};
+  return {items,keys,keyLabel,budget,flares,flarePosition,has,cost,valid,first,maskOf,describe,standard:3};
 })();
 if(typeof module!=='undefined')module.exports=Outfit;
