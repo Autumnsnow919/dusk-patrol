@@ -4,8 +4,8 @@ const Outfit = require('./outfit.js');
 const Sight = require('./sight.js');
 const {randomInt} = require('node:crypto');
 
-const rosters=[[['tern'],['gull']],[['swift'],['wisp','m2000'],['petrel','f5']],
-  [['opal','f15'],['j10'],['ibis'],['j16']]];
+const rosters=[[['tern'],['gull']],[['swift'],['wisp','m2000','viggen'],['petrel','f5','mig21']],
+  [['opal','f15','hornet'],['j10'],['ibis'],['j16']]];
 const carriesMissile=mask=>Object.keys(Sight.profiles).some(id=>Outfit.has(mask,id));
 const names = ['青羽', '浮灯', '雨燕', '云雀'];
 const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
@@ -37,6 +37,25 @@ function assignPartner(drone,humans,assignments){
   drone.partner=id;drone.partnerLife=life;
   if(partner)assignments.set(id,assignments.get(id)+1);
   return partner;
+}
+
+// Formation positions are horizontal even when the lead banks. Steer toward
+// a point beyond the slot; speed control uses the signed error along the track.
+function formationLeg(lead,drone,slot){
+  const b=lead.body,[x,y,z]=b.pos,speed=Math.hypot(b.vel[0],b.vel[2]);
+  const f=b.basis.f,length=Math.hypot(f[0],f[2]);
+  const fx=speed>5?b.vel[0]/speed:f[0]/(length||1),fz=speed>5?b.vel[2]/speed:f[2]/(length||1);
+  const rank=Math.ceil(slot/2),side=slot%2?1:-1;
+  const dx=x-fx*rank*175-fz*rank*150*side-drone.body.pos[0];
+  const dz=z-fz*rank*175+fx*rank*150*side-drone.body.pos[2];
+  const along=dx*fx+dz*fz,lateral=clamp(-dx*fz+dz*fx,480);
+  const leadIn=Math.max(120,speed*2.0);
+  // Ahead of the slot, bleed speed while still facing down the track.
+  const forward=leadIn+Math.max(0,along);
+  const cruise=Flight.fleet[drone.type].cruise;
+  return {dx:fx*forward-fz*lateral,dz:fz*forward+fx*lateral,altitude:y+rank*24,
+    speed:Math.max(cruise*.70,Math.min(cruise*1.7,speed+along*.15)),
+    gap:Math.hypot(dx,dz,drone.body.pos[1]-y-rank*24)};
 }
 
 function chooseAction(arena,drone,opponent,effects){
@@ -137,6 +156,7 @@ class PatrolWaves {
         drone.body=Flight.create(type,[900+drone.radius*Math.sin(angle),drone.cruiseHeight,1500-drone.radius*Math.cos(angle)],
           angle+(i%2?-1:1)*Math.PI/2);
       }
+      drone.trimThrottle=drone.body.throttle;
       if(entry)drone.slotCursor=drone.pack.findIndex(id=>Sight.profiles[id]);
       drone.weapon=drone.pack[drone.slotCursor];
       drone.controls = {pitch:0, roll:0, yaw:0, throttle:0};
@@ -164,18 +184,23 @@ class PatrolWaves {
     }
     const assignments=new Map(humans.map(h=>[h.id,0]));
     for(const d of this.drones)if(d.hp&&assignments.has(d.partner))assignments.set(d.partner,assignments.get(d.partner)+1);
+    const groups=new Map();
     let alive = 0;
     for (const drone of this.drones) {
       if (!drone.hp) continue;
       alive++;
       const {body, controls} = drone, [x, y, z] = body.pos;
       const partner=assignPartner(drone,humans,assignments);
+      const key=partner?.id??null,group=groups.get(key),lead=group?.lead;
+      const slot=group?group.nextSlot++:0;
+      if(!group)groups.set(key,{lead:drone,nextSlot:1});
       const goal=partner?.body.pos;
       const offsetX=(goal?.[0]??900)-900,offsetZ=(goal?.[2]??1500)-1500;
       const reach=Math.min(1,(Lake.arenaRadius-1400)/Math.max(1,Math.hypot(offsetX,offsetZ)));
       const chaseX=900+offsetX*reach-drone.center[0],chaseZ=1500+offsetZ*reach-drone.center[1];
       const distance=goal?flatDistance(body.pos,goal):0;
-      const regroup=goal && distance>(drone.route==='regroup'?1050:1800);
+      const together=drone.route==='regroup'||drone.route==='formation'||drone.route==='join';
+      const regroup=goal && distance>(together?1050:1800);
       const step=regroup?1:Math.min(1,(100+16*this.wave)*interval/Math.max(1,Math.hypot(chaseX,chaseZ)));
       drone.center[0]+=chaseX*step;drone.center[1]+=chaseZ*step;
       const shortLane=drone.lane%2;
@@ -204,6 +229,12 @@ class PatrolWaves {
         dx=drone.center[0]+drone.radius*Math.sin(angle)-x;
         dz=drone.center[1]-drone.radius*Math.cos(angle)-z;
       }
+      let leg=null;
+      if(lead && !drone.gate && (!goal || (regroup && distance<2800 && flatDistance(lead.body.pos,goal)>1250 && flatDistance(body.pos,lead.body.pos)<650))){
+        leg=formationLeg(lead,drone,slot);
+        dx=leg.dx;dz=leg.dz;altitude=leg.altitude;
+        route=leg.gap<(drone.route==='formation'?220:150)?'formation':'join';
+      }
       if(drone.gate){
         route=drone.gate.route;dx=drone.gate.x-x;dz=drone.gate.z-z;
         altitude=route==='entry'?1050:Math.max(y,altitude)+(shortLane?16:32);
@@ -221,8 +252,15 @@ class PatrolWaves {
         const scale=limit/Math.hypot(gx,gz);
         dx=900+gx*scale-x;dz=1500+gz*scale-z;
       }
-      const floor=y<700?Math.max(0,this.groundAt(x,z),this.groundAt(x+body.vel[0]*1.5,z+body.vel[2]*1.5)):0;
-      const clearance=y-floor+Math.min(0,body.vel[1])*1.5;
+      const sink=Math.min(0,body.vel[1]);
+      let floor=0,clearance=y+sink*3;
+      if(clearance<700){
+        // A ridge can sit between the aircraft and the farthest sample.
+        for(const t of [0,.75,1.5,2.25,3]){
+          const height=Math.max(0,this.groundAt(x+body.vel[0]*t,z+body.vel[2]*t));
+          floor=Math.max(floor,height);clearance=Math.min(clearance,y+sink*t-height);
+        }
+      }
       const recover=clearance<(drone.route==='recover'?190:110);
       drone.route=recover?'recover':route;
       const turn = Math.atan2(dx*r[0] + dz*r[2], dx*f[0] + dz*f[2]);
@@ -236,8 +274,10 @@ class PatrolWaves {
       let catchUp=0;
       if(regroup)catchUp=.55;
       else if(route==='approach')catchUp=Math.min(.55,Math.max(0,(distance-300)/1500));
-      const cruise=Flight.fleet[drone.type].cruise*(1+catchUp);
-      controls.throttle = clamp((cruise-Math.hypot(...body.vel))*.08,.8);
+      const cruise=leg?.speed??Flight.fleet[drone.type].cruise*(1+catchUp);
+      const speedError=cruise-Math.hypot(...body.vel);
+      controls.throttle=leg?clamp((drone.trimThrottle*(cruise/Flight.fleet[drone.type].cruise)**2-body.throttle)*2+speedError*.055,.8)
+        :clamp(speedError*.08,.8);
       arena.input(drone,chooseAction(arena,drone,partner,this.effects));
     }
     if (!alive) this.nextWave = arena.time + (this.wave === 3 ? 15 : 5);

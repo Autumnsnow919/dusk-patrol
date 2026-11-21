@@ -506,6 +506,7 @@ void main(){
       float angle=p.x<0.?uCanards.z:uCanards.w;
       p.yz=rot(angle)*(p.yz-uCanards.xy)+uCanards.xy;n.yz=rot(angle)*n.yz;
     }else if(part==14.){
+      if(uPower.w<=0.){gl_Position=vec4(2.,2.,2.,1.);return;}
       vMat=5.;vCol=vec3(uPower.w);
     }
   }
@@ -793,7 +794,7 @@ const PLANE = {
     const parts=Flight.fleet[type]?[]:null;
     const shape = buildPlane(type,null,parts), buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, shape.data, gl.STATIC_DRAW);
-    const mesh={vao:vao(buffer,[3,3,4],10),count:shape.solidEnd,withMist:shape.data.length/10,pivots:shape.pivots,axes:shape.axes};
+    const mesh={vao:vao(buffer,[3,3,4],10),count:shape.solidEnd,withMist:shape.mistEnd??shape.solidEnd,detailed:shape.data.length/10,pivots:shape.pivots,axes:shape.axes};
     if(parts){
       const zones=new Uint8Array(parts.length*3);
       for(let i=0;i<parts.length;i++)zones.fill(parts[i],3*i,3*i+3);
@@ -1493,7 +1494,7 @@ const PLANE = {
       gl.uniform4f(pr.u('uOutlet'),spec.flatOutlet?0:opening,opening,spec.engineSpacing,rig[5]);
       const mist=Math.max(0,1-Math.abs(mach-1)/.087)*clamp((1700-pos[1])/800,0,1);
       gl.uniform4f(pr.u('uControls'),rig[0],rig[1],rig[2],rig[3]);
-      gl.uniform4f(pr.u('uPower'),rig[4],exhaust*(1+.055*Math.sin(S.time*53)),phase,mist);
+      gl.uniform4f(pr.u('uPower'),rig[4],exhaust*(1+.055*Math.sin(S.time*53)),phase,mist>.075?mist:0);
       gl.uniform2f(pr.u('uVectorAxes'),rig[7]||0,rig[8]||0);
       if(spec.canard)gl.uniform4f(pr.u('uCanards'),spec.canard.y,spec.canard.z,
         Flight.canardAngle(spec,rig[0],rig[2],rig[6],-1),Flight.canardAngle(spec,rig[0],rig[2],rig[6],1));
@@ -1504,7 +1505,9 @@ const PLANE = {
         gl.uniform3fv(pr.u('uPivots[0]'),mesh.pivots);gl.uniform3fv(pr.u('uJointAxes[0]'),mesh.axes);
         pr.jointMesh=mesh;
       }
-      gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,mist>.075 && pr===P.mesh?mesh.withMist:mesh.count);
+      const near=pr===P.mesh && (pos[0]-cam.pos[0])**2+(pos[1]-cam.pos[1])**2+(pos[2]-cam.pos[2])**2<210**2;
+      const count=near?mesh.detailed:pr===P.mesh && mist>.075?mesh.withMist:mesh.count;
+      gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,count);
     }
     const inside=cam.wCockpit>.72;
     for(const c of craft)if((!inside||c[1]!==S.pos)&&inView(c[1],48))drawAircraft(...c);
@@ -1799,7 +1802,7 @@ const PLANE = {
     }
   }
   let nextReadout=0;
-  const patrolActions={entry:'入场通飞',patrol:'巡航',regroup:'追赶目标',approach:'接近目标',pass:'交会拉开',space:'拉开间距',escape:'避开光圈',recover:'恢复高度'};
+  const patrolActions={entry:'入场通飞',patrol:'巡航',regroup:'前往会合',join:'追赶领机',formation:'编队跟飞',approach:'接近目标',pass:'交会拉开',space:'拉开间距',escape:'避开光圈',recover:'恢复高度'};
   function showReadout(now) {
     if(now<nextReadout) return; nextReadout=now+150;
     $('strip').classList.toggle('seated',cam.wCockpit>.985);

@@ -47,7 +47,7 @@ function tree(tris){
 }
 function model(type){
   if(models.has(type))return models.get(type);
-  const components=[],scenery=type==='scenery',shape=scenery?null:buildPlane(type,null,components),data=scenery?Lake.vertices():shape.data,scale=scenery?1:1.3,tris=[];
+  const components=[],scenery=type==='scenery',shape=scenery?null:buildPlane(type,null,components,false),data=scenery?Lake.vertices():shape.data,scale=scenery?1:1.3,tris=[];
   const solidFloats=scenery?data.length:shape.solidEnd*10;
   for(let i=0;i<solidFloats;i+=30){
     const mat=data[i+9];if([12,13,14].includes(mat))continue;

@@ -31,7 +31,7 @@ function run(type,frames,input){
   assert(body.pos.every(Number.isFinite));return body;
 }
 const atSpeed=body=>Math.hypot(...body.vel);
-assert.equal(types.length,38);
+assert.equal(types.length,41);
 const Pose=require('./peer-pose.js');
 const {buildPlane}=require('./airframes.js');
 for(const [id,spec] of Object.entries(Flight.fleet)){
@@ -40,6 +40,11 @@ for(const [id,spec] of Object.entries(Flight.fleet)){
   for(let n=9;n<data.length;n+=10)if(data[n]===19)sides.add(Math.sign(data[n-9]));
   assert.equal(sides.size,spec.canard?2:0,id+' moving foreplanes');
   if(!spec.canard)continue;
+  if(spec.canard.flapOnly){
+    assert.equal(Math.abs(Flight.canardAngle(spec,1,1,0,1)),0);
+    assert.equal(Flight.canardAngle(spec,0,0,1,-1),-spec.canard.lift);
+    continue;
+  }
   for(const side of sides){
     assert(Flight.canardAngle(spec,1,0,0,side)<-.4);
     assert(Flight.canardAngle(spec,-1,0,0,side)>.4);
@@ -185,7 +190,7 @@ async function networkCheck(){
     assert.deepEqual(tourPeer.rig,tourPose.rig);assert.equal(tourPeer.type,'opal');
     for(const [i,type] of types.slice(7).entries())assert.equal((await join(type,'pvp','EXTRA'+Math.floor(i/8))).status,200);
     const tickets=await Promise.all([...types.slice(0,7),'kite'].map(type=>join(type)));
-    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===16));
+    assert(tickets.every(ticket=>ticket.status===200&&ticket.protocol===17));
     assert.equal((await join('swift')).status,409);
     const results=await Promise.all(tickets.map(ticket=>call('sync',{controls:{...neutral,vector:true,pitch:1},weapon:'gun',type:'untrusted'},ticket.token)));
     results.forEach((state,index)=>{assert.equal(state.self.type,tickets[index].type);assert.equal(state.peers.length,7);});

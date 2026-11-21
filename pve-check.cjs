@@ -158,6 +158,34 @@ function exerciseRouteChanges(){
 }
 exerciseRouteChanges();
 
+function exerciseFormation(){
+  const game=repeatableArena(),pilot=game.add('guest','tern');
+  game.tick(Flight.tick);pilot.shield=200;
+  const [lead,wing]=game.mission.drones;
+  let held=0;
+  for(let i=0;i<80*120;i++){
+    game.tick(Flight.tick);
+    if(i>45*120 && wing.route==='formation')held++;
+  }
+  assert(held>30*120,'wingman holds a slot on a turning patrol');
+  const separation=Math.hypot(...wing.body.pos.map((v,i)=>v-lead.body.pos[i]));
+  assert(separation>150 && separation<330);
+  lead.hp=0;game.time+=.2;game.mission.update(game);
+  assert.equal(wing.route,'patrol','surviving wingman takes the lead');
+
+  const ridge=repeatableArena(),flyer=ridge.add('flyer','comet');
+  ridge.tick(Flight.tick);ridge.time=4;flyer.shield=200;
+  const [a,b]=ridge.mission.drones;b.hp=0;
+  a.body=Flight.create(a.type,[1000,300,1000],0);a.body.vel=[100,0,0];
+  ridge.mission.groundAt=x=>x>1210 && x<1240?270:0;
+  ridge.mission.update(ridge);
+  assert.equal(a.route,'recover','anticipates a ridge between the old sampling points');
+  assert(a.controls.pitch>0);
+  a.body.pos[1]=1200;ridge.mission.groundAt=()=>assert.fail('high-altitude terrain sample');
+  ridge.time+=.2;ridge.mission.update(ridge);assert.equal(a.route,'patrol');
+}
+exerciseFormation();
+
 function exerciseCrossing(){
   const game=repeatableArena(),pilot=game.add('pilot','tern');
   game.tick(Flight.tick);

@@ -47,22 +47,30 @@ const Flight = (() => {
   fleet.f15={...fleet.comet,name:'F-15C 鹰',role:'双垂尾重型',noseLength:13.8,roll:3.45,pitch:1.75,wingLevel:true};
   fleet.m2000={...fleet.delta,name:'幻影 2000C',role:'无平尾三角翼',singleEngine:true,noseLength:12.6,elevon:true,yawDamper:true};
   fleet.f5={...fleet.petrel,name:'F-5E 虎 II',role:'轻型双发',noseLength:13.2,engineSpacing:.85,roll:5.25,rollCoupling:true};
+  fleet.viggen={...fleet.delta,name:'萨博 37 雷式',role:'鸭式双三角翼',singleEngine:true,noseLength:11.7,elevon:true,landingFlaps:true,roll:3.35};
+  fleet.hornet={...fleet.comet,name:'F/A-18C 大黄蜂',role:'边条翼双发',noseLength:12.5,engineSpacing:1.14,landingFlaps:true,cruise:156,roll:4.15};
+  fleet.mig21={...fleet.needle,name:'米格-21bis',role:'机头进气轻型机',singleEngine:true,noseLength:10.5,yawDamper:true,cruise:194,roll:4.75,thrust:40000};
   // Hinge height and station in mesh units, followed by differential and lift-mode travel.
   for(const [type,y,z,mix,lift] of [
     ['kite',.24,4.62,.13,0],['pulse',.24,4.62,0,0],['petrel',.24,4.62,.19,0],['aurora',.24,4.62,.12,0],
     ['lance',.4,5.42,0,0],['wisp',.52,4.2,0,.32],['ember',.42,4.7,.23,0],['tandem',.85,3.6,0,.22],['ibis',.40,4.85,.16,0],
-    ['j10',.42,3.85,.13,.22],['j20',.50,4.35,.18,0]
+    ['viggen',.74,3.35,0,.32],['j10',.42,3.85,.13,.22],['j20',.50,4.35,.18,0]
   ])fleet[type].canard={y,z,mix,lift};
+  fleet.viggen.canard.flapOnly=true;
   function canardAngle(spec,pitch,roll,deploy,side){
     const c=spec.canard;
+    if(c.flapOnly)return -c.lift*deploy;
     return clamp(-.48*pitch-c.mix*roll*side-c.lift*deploy,-.67,.67);
   }
   const highPower={quill:81000,ogee:114000,cirrus:108000,ibis:73000,nocturne:102000,ember:76000,swift:57000,comet:78000,kite:63500,osprey:63000,pulse:69000,gull:61000,
     needle:16000,delta:90000,petrel:65000,aurora:99000,spire:80000,skate:74000,wisp:70000,opal:70000,lance:81000};
   for(const [type,boost] of Object.entries(highPower))fleet[type].highPower=boost;
-  for(const [type,preset] of [['su27','comet'],['j10','wisp'],['j20','cirrus'],['j16','comet'],['f4','comet'],['f16','petrel'],['f22','lance'],['f15','comet'],['m2000','delta'],['f5','petrel']])
+  for(const [type,preset] of [['su27','comet'],['j10','wisp'],['j20','cirrus'],['j16','comet'],['f4','comet'],['f16','petrel'],['f22','lance'],['f15','comet'],['m2000','delta'],['f5','petrel'],['viggen','delta'],['hornet','comet'],['mig21','spire']])
     fleet[type].highPower=fleet[preset].highPower;
   const cards={
+    viggen:['鸭翼增升','高置鸭翼和低置主翼前后错开。按 V 伸出襟翼，把油门收小，试着用低速通过桥洞。',[7.4,.13,-4.6],[.47,.55,.32]],
+    hornet:['着陆襟翼','长边条从座舱两侧延伸到主翼，两片垂尾向外张开。按 V 放襟翼，适合在短跑道练习进近。',[7,.28,-2.85],[.54,.61,.68]],
+    mig21:['稳向通场','正面能看到圆形进气唇和绿色中心锥，从上方能看清三角翼后独立的小平尾。按 V 稳住航向。',[5.4,.02,-3.72],[.72,.74,.71]],
     f15:['翼平辅助','座舱后方是两条方进气道，两片高垂尾分立于宽机背两侧。松开滚转后按 V，方便改平跟队。',[8.05,.18,-3.05],[.46,.58,.66]],
     m2000:['稳向通场','浅蓝色三角翼一直延伸到机尾，两侧进气道汇入一只圆喷口。V 稳住航向，W/S 驱动升降副翼。',[7.1,.17,-5.35],[.50,.67,.76]],
     f5:['联动滚转','长机鼻、小梯形翼，两只喷口紧挨在单垂尾下。按住 V 配合 Q/E，能带出灵活的联动滚转。',[5.05,.15,-2.55],[.69,.59,.40]],

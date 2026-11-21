@@ -112,13 +112,20 @@ let count=0;
 for(const type of Object.keys(Flight.fleet)){
   const all=[],parts=[],mesh=buildPlane(type,all,parts),cells=all.filter(c=>![12,13,14].includes(c.mat));
   assert(mesh.data.every(Number.isFinite));
+  const base=buildPlane(type,null,null,false);
+  assert.deepEqual(base.data,mesh.data.subarray(0,mesh.solidEnd*10),type+' authoritative solid mesh');
+  const detail=parts.slice(mesh.mistEnd/3);
+  for(const zone of [1,2,3,5,6,7])assert(detail.includes(zone),type+' detail missing in zone '+zone);
+  if(Flight.fleet[type].shaft)assert(detail.includes(8),type+' propeller tip paint');
+  assert(detail.length<380,type+' near mesh triangle budget');
+  for(const side of [-1,1])assert(cells.some(c=>c.mat===8 && side*c[0][0][0]>0),type+' working aileron');
   assert.equal(parts.length*30,mesh.data.length);
   for(let i=1;i<=8;i++)assert.equal(parts.includes(i),!(type==='nocturne'&&i===4),type+' damage zone '+i);
-  if(['su27','j10','j20','j16','f4','f16','f22','f15','f5','m2000'].includes(type)){
+  if(['su27','j10','j20','j16','f4','f16','f22','f15','f5','m2000','viggen','hornet','mig21'].includes(type)){
     assert.equal(cells.filter(c=>c.component==='nozzle' && c.mat===11).length,Flight.fleet[type].singleEngine?3:6);
-    assert.equal(cells.some(c=>c.component==='foreplane'),['j10','j20'].includes(type));
+    assert.equal(cells.some(c=>c.component==='foreplane'),['j10','j20','viggen'].includes(type));
     assert.equal(cells.some(c=>c.component==='tail fairing'),['su27','j16'].includes(type));
-    assert.equal(cells.some(c=>c.component==='canopy' && c.mat===0),['j16','f4','f15','m2000','f5'].includes(type));
+    assert.equal(cells.some(c=>c.component==='canopy' && c.mat===0),['j16','f4','f15','m2000','f5','viggen','hornet','mig21'].includes(type));
   }
   const jet= !Flight.fleet[type].shaft;
   if(jet){
